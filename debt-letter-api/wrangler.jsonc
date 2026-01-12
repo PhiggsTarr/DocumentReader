@@ -1,0 +1,17 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "debt-letter-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-10",
+  "observability": { "enabled": true },
+
+  "workers_dev": true
+
+  // Use secrets in production:
+  //   npx wrangler secret put OPENAI_API_KEY
+  // "vars": { "OPENAI_MODEL": "gpt-4o-mini" }
+}

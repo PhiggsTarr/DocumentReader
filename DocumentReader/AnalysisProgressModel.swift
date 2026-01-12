@@ -59,8 +59,10 @@ final class AnalysisProgressModel: ObservableObject {
 
     /// Call this at milestones (after OCR, after request started, etc.)
     func moveTo(cap newCap: Double) {
-        progressCap = min(max(newCap, 0.0), 1.0)
-        if progress > progressCap { progress = progressCap }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            progressCap = min(max(newCap, 0.0), 1.0)
+            if progress > progressCap { progress = progressCap }
+        }
     }
 
     func finishAndDismiss() {
