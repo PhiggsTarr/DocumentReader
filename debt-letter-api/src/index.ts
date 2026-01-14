@@ -4,12 +4,30 @@ type Amount = { label: string; value: number; currency: string; source?: string 
 type LabeledValue = { label: string; value: string; source: string | null };
 type DetailLevel = "short" | "medium" | "long";
 
+type LegalCitation = {
+  // Prefer citations to the DOCUMENT (clause/section/page + a short quote).
+  // This is reliable because it comes from OCR text.
+  source_type: "document" | "external";
+  source: string; // e.g., "Section 5(b)", "Page 2", "Clause: Termination", or statute name if external
+  quote?: string | null; // short snippet from the document (recommended)
+  url?: string | null;   // optional if external, otherwise null
+};
+
+type PartyRight = {
+  right: string;                 // short label: "Right to terminate", "Right to collect rent", etc.
+  details: string;               // 1–3 sentences explaining the right in plain language
+  source: string | null;         // where in document, e.g. "Section 8", or null
+  citations: LegalCitation[];    // usually document citations
+};
+
 type PartyBenefitsLiabilitiesPenalties = {
   party: string;
+  role_title: string;            // NEW: "Landlord", "Tenant", etc; fallback to "Party 1"/"Party 2"
   benefits: string[];
   liabilities: string[];
   possible_penalties: string[];
   catches: string[];
+  rights: PartyRight[];          // NEW
 };
 
 type WhoBenefitsMost = {
@@ -35,7 +53,6 @@ type DocumentAnalyzeResponse = {
 
   simple_english: string;
 
-  // ✅ NEW: ELI5
   eli5_paragraphs: [string, string];
   eli5_analogy: string;
 
@@ -78,7 +95,6 @@ type ChatRequest = {
   messages: ChatMessage[];
 };
 
-// ✅ NEW: PDF draft shape that iOS will render locally into a PDF
 type PDFDraft = {
   filename?: string;
   title?: string;
@@ -203,17 +219,21 @@ function fallbackResponse(detailLevel: DetailLevel, reason: string): DocumentAna
 	party_analysis: [
 	  {
 		party: "Party A",
+		role_title: "Party 1",
 		benefits: ["Clear expectations"],
 		liabilities: ["May have duties, deadlines, or restrictions"],
 		possible_penalties: ["Possible fees, damages, or termination if obligations are not met (depends on the document)"],
 		catches: ["Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)"],
+		rights: [],
 	  },
 	  {
 		party: "Party B",
+		role_title: "Party 2",
 		benefits: ["Clear expectations"],
 		liabilities: ["May have duties, deadlines, or restrictions"],
 		possible_penalties: ["Possible fees, damages, or termination if obligations are not met (depends on the document)"],
 		catches: ["Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)"],
+		rights: [],
 	  },
 	],
 
@@ -283,7 +303,6 @@ async function callOpenAIChat(env: Env, messages: { role: string; content: strin
   return content;
 }
 
-// ✅ NEW: detect when user asks for a PDF / letter draft
 function userWantsPDF(messages: ChatMessage[]): boolean {
   const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content?.toLowerCase() ?? "";
   const triggers = [
@@ -301,7 +320,6 @@ function userWantsPDF(messages: ChatMessage[]): boolean {
   return triggers.some((t) => lastUser.includes(t));
 }
 
-// ✅ NEW: deterministic fallback PDF draft if JSON parsing fails
 function buildFallbackPdfDraft(lastUserQuestion: string): PDFDraft {
   const safe = lastUserQuestion?.trim() ? lastUserQuestion.trim() : "Request for clarification and response";
   return {
@@ -314,10 +332,7 @@ function buildFallbackPdfDraft(lastUserQuestion: string): PDFDraft {
 		  "This draft is a general informational response based on the provided document context. It is not legal advice.\n\n" +
 		  "It is intended to (1) confirm understanding, (2) request clarifications, and (3) propose next steps.",
 	  },
-	  {
-		heading: "What I’m responding to",
-		body: safe,
-	  },
+	  { heading: "What I’m responding to", body: safe },
 	  {
 		heading: "Questions / Clarifications",
 		body:
@@ -333,8 +348,7 @@ function buildFallbackPdfDraft(lastUserQuestion: string): PDFDraft {
 	  },
 	  {
 		heading: "Closing",
-		body:
-		  "Please respond in writing and reference the specific section(s) for each answer. Thank you.\n\nSincerely,",
+		body: "Please respond in writing and reference the specific section(s) for each answer. Thank you.\n\nSincerely,",
 	  },
 	],
   };
@@ -413,15 +427,33 @@ Match this exact JSON shape:
   "party_analysis": [
 	{
 	  "party": string,
+	  "role_title": string,
 	  "benefits": [string],
 	  "liabilities": [string],
 	  "possible_penalties": [string],
-	  "catches": [string]
+	  "catches": [string],
+	  "rights": [
+		{
+		  "right": string,
+		  "details": string,
+		  "source": string|null,
+		  "citations": [
+			{
+			  "source_type": "document"|"external",
+			  "source": string,
+			  "quote": string|null,
+			  "url": string|null
+			}
+		  ]
+		}
+	  ]
 	}
   ],
+
   "who_benefits_most": { "party": string, "confidence": number, "reasons": [string] },
 
   "analysis_paragraphs": [string, string, string],
+
   "key_facts": {
 	"parties": [string],
 	"dates": [{"label": string, "value": string, "source": string|null}],
@@ -431,27 +463,38 @@ Match this exact JSON shape:
 	"governing_law": string|null,
 	"key_points": [string]
   },
+
   "urgency": {"level":"low"|"medium"|"high", "reasons":[string]},
   "next_steps": [{"title": string, "detail": string}],
   "red_flags": [string],
+
   "drafts": {
 	"response_draft_short": string,
 	"response_draft_medium": string,
 	"response_draft_long": string,
 	"questions_for_advisor": string
   } | null,
+
   "limitations": [string],
   "suggested_questions": [string]
 }
 
 Rules:
-- simple_english: write at a ~6th–8th grade reading level.
-- eli5_paragraphs: MUST be exactly 2 paragraphs, detailed, very simple language.
-- eli5_analogy: a concrete analogy (playground, team rules, renting a bike, borrowing a toy, etc.).
-- party_analysis: list each party you can identify (or Party A / Party B if unclear).
-- liabilities: include obligations + burdens (what they must do / restrictions).
-- possible_penalties: include penalties/remedies/consequences for breach/failure: fees, interest, termination, liquidated damages, indemnification, attorneys’ fees, injunction, acceleration, repossession, etc. If unclear, say so.
-- catches: hidden gotchas / one-sided exceptions / tricky conditions that reduce a benefit or increase risk.
+- simple_english: ~6th–8th grade reading level.
+- eli5_paragraphs: MUST be exactly 2 paragraphs. Simple, concrete.
+- eli5_analogy: concrete analogy.
+- party_analysis:
+  - Identify parties from the document.
+  - role_title MUST be derived from the document if possible (e.g., Landlord, Tenant, Buyer, Seller, Lender, Borrower).
+  - If role titles are not explicitly stated, set role_title to "Party 1", "Party 2", etc.
+- rights:
+  - Each right should be a clear entitlement/permission/remedy granted by the document (e.g., terminate, enter premises, demand payment, withhold performance, cure, inspect, notice).
+  - Each right MUST include a "source" if you can (Section/Page/Clause label), otherwise null.
+  - citations should prefer source_type="document" with a short quote snippet from the OCR text.
+  - Use external citations ONLY if explicitly requested AND you are confident; otherwise omit or keep external urls null.
+- liabilities: include obligations + restrictions.
+- possible_penalties: include remedies/consequences for breach if described.
+- catches: gotchas/conditions/exceptions.
 - who_benefits_most.party must be one of the listed parties or "Unclear".
 - analysis_paragraphs MUST be EXACTLY 3 paragraphs.
 - If unknown, use empty arrays or null where allowed.
@@ -500,12 +543,29 @@ Rules:
 
 		const party_analysis =
 		  Array.isArray((parsed as any)?.party_analysis) && (parsed as any).party_analysis.length > 0
-			? (parsed as any).party_analysis.map((p: any) => ({
-				party: typeof p?.party === "string" && p.party.trim() ? p.party : "Unknown party",
+			? (parsed as any).party_analysis.map((p: any, idx: number) => ({
+				party: typeof p?.party === "string" && p.party.trim() ? p.party : `Party ${idx + 1}`,
+				role_title:
+				  typeof p?.role_title === "string" && p.role_title.trim() ? p.role_title : `Party ${idx + 1}`,
 				benefits: Array.isArray(p?.benefits) ? p.benefits : [],
 				liabilities: Array.isArray(p?.liabilities) ? p.liabilities : [],
 				possible_penalties: Array.isArray(p?.possible_penalties) ? p.possible_penalties : [],
 				catches: Array.isArray(p?.catches) ? p.catches : [],
+				rights: Array.isArray(p?.rights)
+				  ? p.rights.map((r: any) => ({
+					  right: typeof r?.right === "string" ? r.right : "",
+					  details: typeof r?.details === "string" ? r.details : "",
+					  source: typeof r?.source === "string" ? r.source : null,
+					  citations: Array.isArray(r?.citations)
+						? r.citations.map((c: any) => ({
+							source_type: c?.source_type === "external" ? "external" : "document",
+							source: typeof c?.source === "string" ? c.source : "",
+							quote: typeof c?.quote === "string" ? c.quote : null,
+							url: typeof c?.url === "string" ? c.url : null,
+						  }))
+						: [],
+					}))
+				  : [],
 			  }))
 			: fallbackResponse(detail_level, "Missing party_analysis.").party_analysis;
 
@@ -520,7 +580,7 @@ Rules:
 		}
 
 		return json({
-		  ...parsed,
+		  ...(parsed as any),
 		  analysis_paragraphs,
 		  drafts,
 		  simple_english,
@@ -575,7 +635,6 @@ Rules:
 
 	  const wantsPDF = userWantsPDF(messages);
 
-	  // Base system rules for scope
 	  const baseSystem = `
 You are a document-focused legal information assistant.
 
@@ -583,24 +642,21 @@ STRICT SCOPE RULES:
 - Only answer questions that relate to the provided document text and its legal subject matter.
 - If the user asks something unrelated, refuse briefly and instruct them to ask about the document.
 - Do not provide legal advice. Provide general information, explain terms, and point to relevant clauses if possible.
+- If you assert something about what the document says, try to cite the document clause in your wording (e.g., "In Section X...").
 
 ${verbosityRule}
 `.trim();
 
 	  const docContext = `Document text (context):\n\n${document_text}`;
 
-	  // Always include doc context, then chat history
 	  const history = messages
 		.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
 		.map((m) => ({ role: m.role, content: m.content }));
 
 	  try {
-		// ✅ If PDF requested: force strict JSON response with pdf_draft
 		if (wantsPDF) {
 		  const pdfSystem = `
 ${baseSystem}
-
-The user is requesting a custom PDF-style response draft.
 
 Return ONLY valid JSON (no markdown, no backticks), matching EXACTLY:
 
@@ -617,15 +673,8 @@ Return ONLY valid JSON (no markdown, no backticks), matching EXACTLY:
 }
 
 Rules for pdf_draft:
-- sections must be suitable for a professional PDF letter/document.
-- Include at least these sections when appropriate:
-  - "Purpose"
-  - "Key points from the document"
-  - "Requested clarifications / questions"
-  - "Requested changes (if any)"
-  - "Risks / penalties / catches (if relevant)"
-  - "Closing"
 - Keep it informational, not legal advice.
+- Reference document clauses where possible.
 - limitations MUST include "Not legal advice."
 `.trim();
 
@@ -636,12 +685,10 @@ Rules for pdf_draft:
 			{ role: "user", content: `User request: ${lastUser}` },
 		  ]);
 
-		  // Parse JSON
 		  let parsed: any;
 		  try {
 			parsed = safeParseJSON(content);
 		  } catch {
-			// If the model ever returns non-JSON, fallback gracefully
 			const fallbackDraft = buildFallbackPdfDraft(lastUser);
 			return json({
 			  reply: "I drafted a structured response for a PDF export based on your request (informational only).",
@@ -653,7 +700,6 @@ Rules for pdf_draft:
 		  const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : "";
 		  const pdf_draft = parsed?.pdf_draft;
 
-		  // Validate pdf_draft minimal shape
 		  const safeDraft: PDFDraft =
 			pdf_draft && typeof pdf_draft === "object"
 			  ? {
@@ -680,7 +726,6 @@ Rules for pdf_draft:
 		  } satisfies ChatResponse);
 		}
 
-		// ✅ Normal chat: return plain reply only
 		const reply = await callOpenAIChat(env, [
 		  { role: "system", content: baseSystem },
 		  { role: "user", content: docContext },

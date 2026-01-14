@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788.4" systemVersion="24G90" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
+    <entity name="StoredAnalysis" representedClassName="StoredAnalysis" syncable="YES" codeGenerationType="class">
+        <attribute name="analysisJSON" optional="YES" attributeType="Binary"/>
+        <attribute name="confidence" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="docType" optional="YES" attributeType="String"/>
+        <attribute name="exportText" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="whoBenefitsMostConfidence" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="whoBenefitsMostParty" optional="YES" attributeType="String"/>
+        <relationship name="document" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="StoredDocument" inverseName="analyses" inverseEntity="StoredDocument"/>
+    </entity>
+    <entity name="StoredDocument" representedClassName=".StoredDocument" syncable="YES" codeGenerationType="class">
+        <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="docType" optional="YES" attributeType="String"/>
+        <attribute name="documentText" optional="YES" attributeType="String"/>
+        <attribute name="fileURL" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="lastOpenedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="textHash" optional="YES" attributeType="String"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <relationship name="analyses" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="StoredAnalysis" inverseName="document" inverseEntity="StoredAnalysis"/>
+    </entity>
+</model>

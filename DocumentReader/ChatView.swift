@@ -73,6 +73,7 @@ struct ChatView: View {
         .background(ScreenBackground())
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .dismissKeyboardOnTap()
         .polishedNavBar()
         .alert("Error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -193,7 +194,7 @@ Rules:
                     if msg.isThinking {
                         ThinkingDots().padding(.vertical, 6)
                     } else {
-                        Text(msg.content)
+                        SelectableText(text: msg.content)
                     }
                 }
                 .font(.body)
@@ -206,7 +207,11 @@ Rules:
             } else {
                 Spacer(minLength: 40)
 
-                Text(msg.content)
+                SelectableText(
+                    text: msg.content,
+                    font: .preferredFont(forTextStyle: .body),
+                    textColor: .white
+                )
                     .font(.body)
                     .padding(12)
                     .foregroundStyle(.white)
@@ -288,5 +293,41 @@ private struct ThinkingDots: View {
         Circle()
             .frame(width: 7, height: 7)
             .opacity(active ? 1.0 : 0.25)
+    }
+}
+
+
+struct SelectableText: UIViewRepresentable {
+    let text: String
+    var font: UIFont = .preferredFont(forTextStyle: .body)
+    var textColor: UIColor = .label
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+
+        // This enables the standard edit menu (Copy/Select/Select All)
+        tv.dataDetectorTypes = []
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.adjustsFontForContentSizeCategory = true
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        tv.font = font
+        tv.textColor = textColor
+
+        // Optional: make it feel like normal text interaction
+        tv.isUserInteractionEnabled = true
+
+        return tv
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.text = text
+        uiView.font = font
+        uiView.textColor = textColor
     }
 }

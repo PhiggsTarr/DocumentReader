@@ -47,7 +47,7 @@ struct RecentDocumentDetailView: View {
                         Card("Actions") {
                             VStack(spacing: 12) {
                                 NavigationLink {
-                                    AnalysisResultView(result: result, documentText: recent.fullText)
+                                    AnalysisResultView(result: result, documentText: recent.fullText, canSave: false)
                                 } label: {
                                     Text("View Results")
                                         .frame(maxWidth: .infinity)

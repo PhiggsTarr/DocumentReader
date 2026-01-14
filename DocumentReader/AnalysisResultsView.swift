@@ -1,11 +1,37 @@
+//
+//  AnalysisResultView.swift
+//  DocumentReader
+//
+
 import SwiftUI
 import UIKit
+import CryptoKit
 
 struct AnalysisResultView: View {
     let result: DocumentAnalyzeResponse
     let documentText: String
-
+    let canSave: Bool
+    @State private var isSaving = false
+    @State private var isSaved = false
+    @State private var saveToast: String?
+    @Environment(\.managedObjectContext) private var moc
+    @StateObject private var store = DocumentStore()
     @State private var copiedToast: String?
+    
+    private func saveToHistory() {
+        do {
+            try store.saveDocument(
+                title: result.docType ?? "Document",
+                documentText: documentText,
+                fileURL: nil, // or URL if you saved the PDF to disk
+                analysis: result,
+                exportText: exportText
+                
+            )
+        } catch {
+            print("Save failed: \(error)")
+        }
+    }
 
     private var exportText: String {
         var parts: [String] = []
@@ -27,18 +53,19 @@ struct AnalysisResultView: View {
         parts.append("")
 
         if let simple = result.simpleEnglish, !simple.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            parts.append("Explanation in simple English:")
+            parts.append("Explain it to me in plain simple English:")
             parts.append(simple)
             parts.append("")
         }
 
         if let eli5 = result.eli5Paragraphs, eli5.count >= 2 {
-            parts.append("Explain like I'm 5:")
+            parts.append("Explain it to me like I'm 5:")
             parts.append(eli5[0])
             parts.append("")
             parts.append(eli5[1])
             parts.append("")
         }
+
         if let analogy = result.eli5Analogy, !analogy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parts.append("ELI5 Analogy:")
             parts.append(analogy)
@@ -69,6 +96,13 @@ struct AnalysisResultView: View {
                     parts.append("  Catches / gotchas:")
                     parts.append(contentsOf: p.catches.map { "  - \($0)" })
                 }
+
+                if !p.rights.isEmpty {
+                    parts.append("  Rights:")
+                    for r in p.rights {
+                        parts.append("  - \(r.right): \(r.details)")
+                    }
+                }
             }
             parts.append("")
         }
@@ -98,7 +132,14 @@ struct AnalysisResultView: View {
         ZStack {
             ScreenBackground()
 
+
             ScrollView {
+//                Button {
+//                    saveToHistory()
+//                } label: {
+//                    Label("Save", systemImage: "tray.and.arrow.down")
+//                }
+//                .buttonStyle(.bordered)
                 VStack(spacing: 14) {
 
                     Card("Summary") {
@@ -114,6 +155,7 @@ struct AnalysisResultView: View {
                             }
                         }
                     }
+
                     if let paras = result.analysisParagraphs, !paras.isEmpty {
                         Card("Detailed analysis") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -136,7 +178,6 @@ struct AnalysisResultView: View {
                         }
                     }
 
-                    // ✅ NEW: ELI5 section
                     if let eli5 = result.eli5Paragraphs, eli5.count >= 2 {
                         Card("Explain like I’m 5") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -169,37 +210,57 @@ struct AnalysisResultView: View {
                             VStack(alignment: .leading, spacing: 14) {
                                 ForEach(parties) { p in
                                     VStack(alignment: .leading, spacing: 10) {
-                                        Text(p.party)
+                                        ThickDividerTwo()
+                                        Text(p.roleTitle.isEmpty ? "Party" : p.roleTitle)
                                             .font(.headline)
+                                            .fontWeight(.bold)
+
+                                        Text(p.party.isEmpty ? "Unknown party" : p.party)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        ThickDivider()
 
                                         if !p.benefits.isEmpty {
                                             sectionTitle("Benefits")
                                             bulletList(p.benefits)
+                                            ThickDivider()
                                         }
 
                                         if !p.liabilities.isEmpty {
                                             sectionTitle("Liabilities / obligations")
                                             bulletList(p.liabilities)
+                                            ThickDivider()
                                         }
 
                                         if !p.possiblePenalties.isEmpty {
                                             sectionTitle("Possible penalties / consequences")
                                             bulletList(p.possiblePenalties)
+                                            ThickDivider()
                                         }
 
-                                        // ✅ NEW
                                         if !p.catches.isEmpty {
                                             sectionTitle("Catches / gotchas")
                                             bulletList(p.catches)
+                                            ThickDivider()
                                         }
 
-                                        if p.benefits.isEmpty && p.liabilities.isEmpty && p.possiblePenalties.isEmpty && p.catches.isEmpty {
-                                            Text("No party-specific items could be inferred from the text.")
-                                                .foregroundStyle(.secondary)
+                                        if !p.rights.isEmpty {
+                                            sectionTitle("Rights")
+                                            ForEach(p.rights) { r in
+                                                Text("• \(r.right): \(r.details)")
+                                                    .foregroundStyle(.secondary)
+
+                                                if !r.citations.isEmpty {
+                                                    ForEach(r.citations.indices, id: \.self) { i in
+                                                        let c = r.citations[i]
+                                                        Text("↳ \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
+                                                            .font(.footnote)
+                                                            .foregroundStyle(.secondary.opacity(0.85))
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
-
-                                    Divider().opacity(0.25)
                                 }
                             }
                         }
@@ -238,7 +299,6 @@ struct AnalysisResultView: View {
                             }
                         }
                     }
-
 
                     if let drafts = result.drafts?.allDrafts, !drafts.isEmpty {
                         Card("Draft letters") {
@@ -286,6 +346,8 @@ struct AnalysisResultView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    
+                    SaveAnalysisCard(canSave: canSave, result: result, documentText: documentText, exportText: exportText)
 
                     if let lim = result.limitations, !lim.isEmpty {
                         Card("Limitations") {
@@ -325,8 +387,10 @@ struct AnalysisResultView: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .font(.headline)
+            .fontWeight(.bold)
+            .foregroundStyle(.primary)
+            .padding(.top, 4)
     }
 
     private func bulletList(_ items: [String]) -> some View {
@@ -347,5 +411,140 @@ struct AnalysisResultView: View {
                 .fontWeight(.semibold)
         }
         .font(.subheadline)
+    }
+}
+
+
+struct ThickDivider: View {
+    var body: some View {
+        Rectangle()
+            .frame(height: 2)
+            .foregroundColor(.white.opacity(0.25))
+            .padding(.vertical, 4)
+    }
+}
+
+struct ThickDividerTwo: View {
+    var body: some View {
+        Rectangle()
+            .frame(height: 16)
+            .foregroundColor(.white.opacity(0.25))
+            .padding(.vertical, 4)
+    }
+}
+
+struct SaveAnalysisCard: View {
+    let canSave: Bool
+    let result: DocumentAnalyzeResponse
+    let documentText: String
+    let exportText: String
+
+    @State private var isSaving = false
+    @State private var isSaved = false
+    @State private var toast: String?
+
+    // Prefer injecting the store (see notes below). This is OK if DocumentStore is lightweight.
+    @StateObject private var store = DocumentStore()
+
+    var body: some View {
+        Group {
+            if canSave {
+                Card("Save") {
+                    Button {
+                        save()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: isSaved ? "checkmark.circle.fill" : "tray.and.arrow.down.fill")
+                            Text(isSaved ? "Saved" : (isSaving ? "Saving…" : "Save"))
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isSaved || isSaving)
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let toast {
+                Text(toast)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            withAnimation { self.toast = nil }
+                        }
+                    }
+            }
+        }
+    }
+    func sha256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
+    private func save() {
+        guard !isSaving && !isSaved else {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            toast = "Already saved"
+            return
+        }
+
+        isSaving = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        do {
+            let hash = sha256(documentText)
+
+            if let _ = try store.existsDocument(withTextHash: hash) {
+                isSaved = true
+                isSaving = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                toast = "Already saved"
+                return
+            }
+
+            try store.saveDocument(
+                title: result.docType ?? "Document",
+                documentText: documentText,
+                fileURL: nil,
+                analysis: result,
+                exportText: exportText
+            )
+
+            isSaved = true
+            isSaving = false
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            toast = "Saved"
+        } catch {
+            isSaving = false
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            toast = "Save failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+
+
+extension UIApplication {
+    func dismissKeyboard() {
+        sendAction(#selector(UIResponder.resignFirstResponder),
+                   to: nil, from: nil, for: nil)
+    }
+}
+
+extension View {
+    /// Tap anywhere to dismiss keyboard.
+    func dismissKeyboardOnTap() -> some View {
+        self.onTapGesture {
+            UIApplication.shared.dismissKeyboard()
+        }
     }
 }
