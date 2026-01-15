@@ -208,9 +208,20 @@ struct AnalysisResultView: View {
                     if let parties = result.partyAnalysis, !parties.isEmpty {
                         Card("Benefits, liabilities, penalties & catches") {
                             VStack(alignment: .leading, spacing: 14) {
-                                ForEach(parties) { p in
+                                ForEach(parties.indices, id: \.self) { index in
+                                    let p = parties[index]
+
                                     VStack(alignment: .leading, spacing: 10) {
-                                        ThickDividerTwo()
+
+                                        // Add spacing before every item except the first
+                                        if index != 0 {
+                                            ThickDividerTwo()  // adjust this value to your desired spacing
+                                            Spacer()
+                                                .frame(height: 25)
+                                        } else{
+                                            Spacer()
+                                                .frame(height: 5)
+                                        }
                                         Text(p.roleTitle.isEmpty ? "Party" : p.roleTitle)
                                             .font(.headline)
                                             .fontWeight(.bold)
@@ -258,6 +269,9 @@ struct AnalysisResultView: View {
                                                             .foregroundStyle(.secondary.opacity(0.85))
                                                     }
                                                 }
+                                            }
+                                            if index != 0 {
+                                                ThickDividerTwo()
                                             }
                                         }
                                     }

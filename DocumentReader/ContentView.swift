@@ -361,7 +361,7 @@ struct ContentView: View {
                     ForEach(savedDocs) { doc in
                         NavigationLink {
                             // This should show the saved analyses for that document
-                            SavedDocumentDetailView(document: doc)
+                            StoredDocumentDetailView(document: doc)
                           //  StoredDocumentDetailView(document: doc)
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
@@ -613,78 +613,5 @@ private final class LightingAnalyzer {
         }
         if b < 0.26 { return .dim(score: b) }
         return .good
-    }
-}
-
-
-
-struct SavedDocumentDetailView: View {
-    let document: StoredDocument
-
-    @StateObject private var store = DocumentStore()
-
-    // Pick which analysis to show (latest)
-    private var latestAnalysis: StoredAnalysis? {
-        // If you modeled StoredDocument <-> StoredAnalysis as one-to-many
-        // and named the relationship "analyses":
-        let set = document.analyses as? Set<StoredAnalysis> ?? []
-        return set.sorted(by: { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }).first
-    }
-
-    private var decoded: DocumentAnalyzeResponse? {
-        guard let a = latestAnalysis else { return nil }
-        return store.decodeAnalysis(a)
-    }
-
-    var body: some View {
-        ZStack {
-            ScreenBackground()
-
-            ScrollView {
-                VStack(spacing: 14) {
-
-                    // Show the latest saved analysis using your existing AnalysisResultView
-                    if let decoded {
-                        AnalysisResultView(
-                            result: decoded,
-                            documentText: document.documentText ?? "",
-                            canSave: false // ✅ saved screen should not show save UI
-                        )
-                        .disabled(true) // (optional) if you want it read-only
-                    } else {
-                        Card("Saved analysis") {
-                            Text("No saved analysis found for this document.")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    // ✅ Chat option for saved file
-                    Card("Chat") {
-                        NavigationLink {
-                            ChatView(
-                                documentText: document.documentText ?? "",
-                                suggestedQuestions: decoded?.suggestedQuestions ?? []
-                            )
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "bubble.left.and.bubble.right.fill")
-                                Text("Chat about this saved document")
-                                    .fontWeight(.semibold)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-                .padding(.horizontal, DS.pagePadding)
-                .padding(.top, 12)
-                .padding(.bottom, 30)
-            }
-        }
-        .navigationTitle(document.title ?? "Saved Document")
-        .navigationBarTitleDisplayMode(.inline)
-        .polishedNavBar()
     }
 }
