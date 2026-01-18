@@ -469,7 +469,7 @@ struct ContentView: View {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.count >= 30 else {
                 progressModel.stop()
-                errorMessage = "OCR text is too short to analyze. Try scanning again with better lighting."
+                errorMessage = "Scanned text is too short to analyze. Try scanning again with better lighting."
                 return
             }
 

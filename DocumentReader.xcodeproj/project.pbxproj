@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		BF26F5FC2F1CA31C00D9D7DF /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = BF26F5FB2F1CA31C00D9D7DF /* ZIPFoundation */; };
+		BFB772B12F1CA5C10020FC2D /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = BFB772B02F1CA5C10020FC2D /* Lottie */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		BF7FBBC52F12B14A000D2DC8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +70,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BF26F5FC2F1CA31C00D9D7DF /* ZIPFoundation in Frameworks */,
+				BFB772B12F1CA5C10020FC2D /* Lottie in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,12 +92,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		BF26F5FA2F1CA31C00D9D7DF /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		BF7FBBAE2F12B147000D2DC8 = {
 			isa = PBXGroup;
 			children = (
 				BF7FBBB92F12B147000D2DC8 /* DocumentReader */,
 				BF7FBBC72F12B14A000D2DC8 /* DocumentReaderTests */,
 				BF7FBBD12F12B14A000D2DC8 /* DocumentReaderUITests */,
+				BF26F5FA2F1CA31C00D9D7DF /* Frameworks */,
 				BF7FBBB82F12B147000D2DC8 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -125,6 +140,8 @@
 			);
 			name = DocumentReader;
 			packageProductDependencies = (
+				BF26F5FB2F1CA31C00D9D7DF /* ZIPFoundation */,
+				BFB772B02F1CA5C10020FC2D /* Lottie */,
 			);
 			productName = DocumentReader;
 			productReference = BF7FBBB72F12B147000D2DC8 /* DocumentReader.app */;
@@ -210,6 +227,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				BF26F5F12F1C07B600D9D7DF /* XCLocalSwiftPackageReference "../../Downloads/ZIPFoundation-development" */,
+				BFB772AF2F1CA5980020FC2D /* XCRemoteSwiftPackageReference "lottie-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BF7FBBB82F12B147000D2DC8 /* Products */;
@@ -587,6 +605,30 @@
 			relativePath = "../../Downloads/ZIPFoundation-development";
 		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BFB772AF2F1CA5980020FC2D /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BF26F5FB2F1CA31C00D9D7DF /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BF26F5F12F1C07B600D9D7DF /* XCLocalSwiftPackageReference "../../Downloads/ZIPFoundation-development" */;
+			productName = ZIPFoundation;
+		};
+		BFB772B02F1CA5C10020FC2D /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BFB772AF2F1CA5980020FC2D /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = BF7FBBAF2F12B147000D2DC8 /* Project object */;
 }
