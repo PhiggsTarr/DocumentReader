@@ -208,6 +208,9 @@
 			);
 			mainGroup = BF7FBBAE2F12B147000D2DC8;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				BF26F5F12F1C07B600D9D7DF /* XCLocalSwiftPackageReference "../../Downloads/ZIPFoundation-development" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BF7FBBB82F12B147000D2DC8 /* Products */;
 			projectDirPath = "";
@@ -418,6 +421,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "Launch Screen";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -448,6 +452,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "Launch Screen";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -575,6 +580,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BF26F5F12F1C07B600D9D7DF /* XCLocalSwiftPackageReference "../../Downloads/ZIPFoundation-development" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../Downloads/ZIPFoundation-development";
+		};
+/* End XCLocalSwiftPackageReference section */
 	};
 	rootObject = BF7FBBAF2F12B147000D2DC8 /* Project object */;
 }

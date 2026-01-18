@@ -16,6 +16,7 @@ struct ContentView: View {
 
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
+    @State private var activeConversationId: String = UUID().uuidString
 
     @State private var showScanner = false
     @State private var ocrTextPreview: String = ""
@@ -260,7 +261,7 @@ struct ContentView: View {
 
                 NavigationLink {
                     ChatView(
-                        documentText: lastDocumentText,
+                        conversationId: ConversationId.fromDocumentText(lastDocumentText), documentText: lastDocumentText,
                         suggestedQuestions: result.suggestedQuestions ?? []
                     )
                 } label: {
@@ -284,7 +285,7 @@ struct ContentView: View {
                 VStack(spacing: 10) {
                     ForEach(recents.items) { item in
                         NavigationLink {
-                            ChatView(documentText: item.fullText, suggestedQuestions: [])
+                            ChatView(conversationId: ConversationId.fromDocumentText(item.fullText), documentText: item.fullText, suggestedQuestions: [])
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: "doc.text")
@@ -613,5 +614,22 @@ private final class LightingAnalyzer {
         }
         if b < 0.26 { return .dim(score: b) }
         return .good
+    }
+}
+
+private enum ConversationIdProvider {
+    static func fromText(_ text: String) -> String {
+        // Stable “conversation” id for a given document text
+        // (so PDFs can be rediscovered later)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "doc-\(sha256Hex(trimmed))"
+    }
+
+    private static func sha256Hex(_ s: String) -> String {
+        // Simple stable hash. If you already have CryptoKit, use SHA256 there instead.
+        // This fallback is fine for an id, not for security.
+        var hasher = Hasher()
+        hasher.combine(s)
+        return String(hasher.finalize())
     }
 }

@@ -17,6 +17,45 @@ final class DocumentStore: ObservableObject {
     init(container: NSPersistentContainer = PersistenceController.shared.container) {
         self.container = container
     }
+
+
+        // MARK: - Save
+
+        /// Saves an analysis result into Core Data under a StoredDocument.
+        @discardableResult
+        func saveAnalysis(
+            result: DocumentAnalyzeResponse,
+            for document: StoredDocument,
+            in context: NSManagedObjectContext
+        ) throws -> StoredAnalysis {
+
+            let a = StoredAnalysis(context: context)
+
+            a.createdAt = Date()
+            a.docType = result.docType
+            a.confidence = result.confidence ?? 0
+
+            // ✅ Option A: store summary on the StoredAnalysis row
+            a.summaryPlain = result.summaryPlain
+
+            // Link
+            a.document = document
+
+            try context.save()
+            return a
+        }
+
+        // MARK: - Decode
+
+        /// If you already store the full JSON response somewhere (StoredAnalysis.rawJSON etc),
+        /// keep this function for your SavedAnalysisDetailView.
+        ///
+        /// If you do NOT store raw JSON, you can still show the Saved Analysis UI by
+        /// fetching the original document text and re-running analysis — but your app
+        /// already has saved analysis JSON based on your earlier code, so this stays.
+
+
+    
     func existsDocument(withTextHash hash: String) throws -> StoredDocument? {
         let request = StoredDocument.fetchRequest()
         request.fetchLimit = 1
@@ -93,6 +132,7 @@ final class DocumentStore: ObservableObject {
         stored.exportText = exportText
         stored.docType = analysis.docType
         stored.confidence = analysis.confidence ?? 0
+        stored.summaryPlain = analysis.summaryPlain
 
         if let wb = analysis.whoBenefitsMost {
             stored.whoBenefitsMostParty = wb.party

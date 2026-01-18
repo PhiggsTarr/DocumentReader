@@ -55,7 +55,7 @@ struct RecentDocumentDetailView: View {
                                 .buttonStyle(.plain)
 
                                 NavigationLink {
-                                    ChatView(documentText: recent.fullText,
+                                    ChatView(conversationId: UUID().uuidString, documentText: recent.fullText,
                                              suggestedQuestions: result.suggestedQuestions ?? [])
                                 } label: {
                                     Text("Chat about this document")

@@ -4,6 +4,12 @@
 //
 //  Created by Gboinyee Tarr on 1/14/26.
 //
+//
+//  StoredAnalysisDetailView.swift
+//  DocumentReader
+//
+//  Created by Gboinyee Tarr on 1/14/26.
+//
 
 
 import SwiftUI
@@ -18,6 +24,11 @@ struct StoredAnalysisDetailView: View {
 
     private let store = DocumentStore()
 
+    // ✅ Stable per-analysis conversationId
+    private var conversationId: String {
+        stored.objectID.uriRepresentation().absoluteString
+    }
+
     var body: some View {
         ZStack {
             ScreenBackground()
@@ -29,6 +40,7 @@ struct StoredAnalysisDetailView: View {
                     Card("Chat") {
                         NavigationLink {
                             ChatView(
+                                conversationId: conversationId,
                                 documentText: documentText,
                                 suggestedQuestions: decoded?.suggestedQuestions ?? []
                             )
@@ -46,15 +58,12 @@ struct StoredAnalysisDetailView: View {
                         .disabled(documentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    // ✅ FULL analysis UI (reuse your existing AnalysisResultView)
                     if let decoded {
                         AnalysisResultView(
                             result: decoded,
                             documentText: documentText,
-                            canSave: false // saved screen shouldn't show "Save"
+                            canSave: false
                         )
-                        // Optional: if you want it visually “read-only”, keep interactions.
-                        // .disabled(false)
                     } else {
                         Card("Saved analysis") {
                             HStack(spacing: 10) {
@@ -65,8 +74,6 @@ struct StoredAnalysisDetailView: View {
                             }
                         }
                     }
-
-
                 }
                 .padding(.horizontal, DS.pagePadding)
                 .padding(.top, 12)
@@ -77,7 +84,6 @@ struct StoredAnalysisDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .polishedNavBar()
         .task {
-            // Decode once when the view loads
             decoded = store.decodeAnalysis(stored)
         }
         .overlay(alignment: .top) {
@@ -106,7 +112,7 @@ struct StoredAnalysisDetailView: View {
         }
     }
 
-    // Build export text in the SAME way AnalysisResultView does (reuse your logic)
+    // (Your exportText(...) stays the same below)
     private func exportText(for result: DocumentAnalyzeResponse) -> String {
         var parts: [String] = []
         parts.append("Document type: \(result.docType ?? "Unknown")")

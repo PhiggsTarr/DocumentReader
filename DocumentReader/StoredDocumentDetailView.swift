@@ -5,12 +5,23 @@
 //  Created by Gboinyee Tarr on 1/14/26.
 //
 
+//
+//  StoredDocumentDetailView.swift
+//  DocumentReader
+//
+//  Created by Gboinyee Tarr on 1/14/26.
+//
 
 import SwiftUI
 
 struct StoredDocumentDetailView: View {
     let document: StoredDocument
     @State private var analyses: [StoredAnalysis] = []
+
+    // Latest analysis = first after sorting (newest first)
+    private var latestAnalysis: StoredAnalysis? {
+        analyses.first
+    }
 
     var body: some View {
         ZStack {
@@ -37,20 +48,48 @@ struct StoredDocumentDetailView: View {
 
     private var documentCard: some View {
         Card("Document") {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(document.title ?? "Untitled")
                     .font(.title3.weight(.bold))
 
-                if let docType = document.docType {
+                if let docType = document.docType, !docType.isEmpty {
                     Text(docType)
                         .foregroundStyle(.secondary)
                 }
 
-                if let text = document.documentText, !text.isEmpty {
-                    Divider().opacity(0.25)
-                    Text(text)
+                Divider().opacity(0.25)
+
+                if let a = latestAnalysis {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Summary (from latest saved analysis)")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        let summary = (a.summaryPlain ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        Text(summary.isEmpty ? "No summary saved for this analysis." : summary)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(10)
+
+                        HStack(spacing: 10) {
+                            if let date = a.createdAt {
+                                Text("Last analyzed: \(date.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            if a.confidence > 0 {
+                                Text("Confidence: \(Int(a.confidence * 100))%")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else {
+                    Text("No saved analysis yet. Run an analysis to see a summary here.")
                         .foregroundStyle(.secondary)
-                        .lineLimit(10)
+                        .lineLimit(3)
                 }
             }
         }
@@ -65,7 +104,6 @@ struct StoredDocumentDetailView: View {
                 } else {
                     ForEach(analyses) { a in
                         NavigationLink {
-                            // ✅ PASS document text so the Chat card in SavedAnalysisDetailView works
                             StoredAnalysisDetailView(
                                 stored: a,
                                 documentText: document.documentText ?? ""
