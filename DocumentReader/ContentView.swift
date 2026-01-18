@@ -24,21 +24,23 @@ struct ContentView: View {
     @StateObject private var recents = RecentDocumentsStore()
     @StateObject private var progressModel = AnalysisProgressModel()
 
+    @State private var showPaywall = false
+
     // Lighting guidance
     @State private var lightingWarning: String? = nil
     @State private var showDimLightAlert: Bool = false
 
     private let apiClient = APIClient()
     private let ocrService = OCRService()
-    
+
     @Environment(\.managedObjectContext) private var context
+    @EnvironmentObject private var purchaseManager: PurchaseManager
 
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \StoredDocument.lastOpenedAt, ascending: false)],
         animation: .default
     )
     private var savedDocs: FetchedResults<StoredDocument>
-
 
     var body: some View {
         NavigationStack {
@@ -49,7 +51,6 @@ struct ContentView: View {
                     VStack(spacing: 16) {
                         header
                         scanCard
-                       // scanTipsCard
 
                         if let w = lightingWarning {
                             NoticeBanner(
@@ -60,17 +61,6 @@ struct ContentView: View {
                             .padding(.horizontal, DS.pagePadding)
                             .transition(.move(edge: .top).combined(with: .opacity))
                         }
-
-//                        if !ocrTextPreview.isEmpty {
-//                            DisclosureCardHome("OCR Preview", icon: "text.viewfinder", tint: .teal, defaultExpanded: false) {
-//                                Text(ocrTextPreview)
-//                                    .font(.callout)
-//                                    .foregroundStyle(.secondary)
-//                                    .frame(maxWidth: .infinity, alignment: .leading)
-//                                    .lineLimit(14)
-//                            }
-//                            .padding(.horizontal, DS.pagePadding)
-//                        }
 
                         if let result = analysisResult {
                             resultPreview(result: result)
@@ -105,6 +95,11 @@ struct ContentView: View {
                     }
                 )
             }
+            .sheet(isPresented: $showPaywall) {
+                NavigationStack {
+                    PaywallView()
+                }
+            }
 
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -116,7 +111,7 @@ struct ContentView: View {
             }
 
             .alert("Low light detected", isPresented: $showDimLightAlert) {
-                Button("Rescan") { showScanner = true }
+                Button("Rescan") { attemptStartScan() }
                 Button("Continue", role: .cancel) { }
             } message: {
                 Text("Turn on a lamp or move near a window. Avoid shadows and glare for accurate scan.")
@@ -128,6 +123,10 @@ struct ContentView: View {
             }
         }
         .environmentObject(recents)
+        .task {
+            // Keep entitlement fresh when app loads
+            await purchaseManager.refreshEntitlements()
+        }
     }
 
     // MARK: - Header
@@ -147,6 +146,17 @@ struct ContentView: View {
                 Pill(text: "Informational only", icon: "info.circle.fill", tone: .neutral)
                 Pill(text: "Not legal advice", icon: "shield.lefthalf.filled", tone: .warning)
             }
+
+            // Optional: subtle remaining/free indicator
+            if !purchaseManager.isPro {
+                Text("Free scans remaining: \(purchaseManager.freeScansRemaining)")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+            } else {
+                Text("Pro unlocked")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+            }
         }
         .padding(.vertical, 10)
         .padding(.horizontal, DS.pagePadding)
@@ -158,7 +168,7 @@ struct ContentView: View {
         Card("Scan", icon: "doc.viewfinder", tint: .blue) {
             VStack(spacing: 12) {
                 Button {
-                    showScanner = true
+                    attemptStartScan()
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.viewfinder")
@@ -187,34 +197,17 @@ struct ContentView: View {
         .padding(.horizontal, DS.pagePadding)
     }
 
-    // MARK: - Scan tips
+    private func attemptStartScan() {
+        guard !isLoading else { return }
 
-    private var scanTipsCard: some View {
-        Card("Photo tips", icon: "lightbulb.fill", tint: .yellow) {
-            VStack(alignment: .leading, spacing: 10) {
-                tipRow("lamp.desk.fill", "Add light", "Turn on a lamp or move closer to a window.")
-                tipRow("doc.text.viewfinder", "Fill the frame", "Keep the entire page inside the borders.")
-                tipRow("iphone", "Hold steady", "Rest your elbows or place the paper flat.")
-                tipRow("sparkles", "Avoid glare", "Tilt the page slightly if you see reflections.")
-            }
-        }
-        .padding(.horizontal, DS.pagePadding)
-    }
+        if ScanGate.canStartScan(purchaseManager: purchaseManager) {
+            // Consume the free scan *at scan start* (so backing out of scanner still counts as an attempt).
+            // If you want to only consume after a successful scan, move this call into `handleScan(...)` right before OCR.
+            purchaseManager.consumeFreeScanIfNeeded()
 
-    private func tipRow(_ icon: String, _ title: String, _ subtitle: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .frame(width: 26)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
+            showScanner = true
+        } else {
+            showPaywall = true
         }
     }
 
@@ -234,10 +227,11 @@ struct ContentView: View {
                     }
                     NavigationLink {
                         AnalysisResultView(result: result, documentText: lastDocumentText, canSave: false)
+                    } label: {
+                        EmptyView()
                     }
-                    label: {
-                        
-                    }
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
                 }
 
                 Text(result.summaryPlain ?? "No summary returned.")
@@ -261,7 +255,8 @@ struct ContentView: View {
 
                 NavigationLink {
                     ChatView(
-                        conversationId: ConversationId.fromDocumentText(lastDocumentText), documentText: lastDocumentText,
+                        conversationId: ConversationId.fromDocumentText(lastDocumentText),
+                        documentText: lastDocumentText,
                         suggestedQuestions: result.suggestedQuestions ?? []
                     )
                 } label: {
@@ -275,7 +270,7 @@ struct ContentView: View {
         Card("Recent documents", icon: "clock.fill", tint: .gray) {
 
             // --------------------------
-            // 1) Your existing Recents
+            // 1) Recents
             // --------------------------
             if recents.items.isEmpty {
                 Text("No recent documents yet. Scan something to get started.")
@@ -285,7 +280,11 @@ struct ContentView: View {
                 VStack(spacing: 10) {
                     ForEach(recents.items) { item in
                         NavigationLink {
-                            ChatView(conversationId: ConversationId.fromDocumentText(item.fullText), documentText: item.fullText, suggestedQuestions: [])
+                            ChatView(
+                                conversationId: ConversationId.fromDocumentText(item.fullText),
+                                documentText: item.fullText,
+                                suggestedQuestions: []
+                            )
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: "doc.text")
@@ -335,7 +334,7 @@ struct ContentView: View {
             }
 
             // --------------------------------
-            // 2) NEW: Saved documents (CoreData)
+            // 2) Saved documents (CoreData)
             // --------------------------------
             Divider().opacity(0.35)
                 .padding(.vertical, 6)
@@ -345,8 +344,6 @@ struct ContentView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-
-                // Optional: quick count
                 Text("\(savedDocs.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -361,9 +358,7 @@ struct ContentView: View {
                 VStack(spacing: 10) {
                     ForEach(savedDocs) { doc in
                         NavigationLink {
-                            // This should show the saved analyses for that document
                             StoredDocumentDetailView(document: doc)
-                          //  StoredDocumentDetailView(document: doc)
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: "tray.full")
@@ -374,7 +369,6 @@ struct ContentView: View {
                                     Text(doc.title ?? "Untitled")
                                         .font(.subheadline.weight(.semibold))
 
-                                    // Show docType or a preview
                                     Text(doc.docType ?? "Saved document")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
@@ -419,7 +413,6 @@ struct ContentView: View {
             }
         }
     }
-
 
     private func rowLink(icon: String, title: String) -> some View {
         HStack(spacing: 10) {
@@ -475,6 +468,7 @@ struct ContentView: View {
 
             lastDocumentText = trimmed
             progressModel.moveTo(cap: 0.90)
+
             let result = try await apiClient.analyzeDocument(text: trimmed)
 
             analysisResult = result
@@ -491,54 +485,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Local subviews
-
-private struct DisclosureCardHome<Content: View>: View {
-    let title: String
-    let icon: String?
-    let tint: Color?
-    let defaultExpanded: Bool
-    let content: Content
-
-    @State private var isExpanded: Bool
-
-    init(_ title: String,
-         icon: String? = nil,
-         tint: Color? = nil,
-         defaultExpanded: Bool = true,
-         @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.icon = icon
-        self.tint = tint
-        self.defaultExpanded = defaultExpanded
-        self.content = content()
-        self._isExpanded = State(initialValue: defaultExpanded)
-    }
-
-    var body: some View {
-        Card(nil) {
-            Button {
-                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 10) {
-                    SectionHeader(title: title, icon: icon, tint: tint)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                Divider().opacity(0.25)
-                content
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-    }
-}
+// MARK: - Local subviews (UNCHANGED)
 
 private struct NoticeBanner: View {
     let title: String
@@ -570,7 +517,7 @@ private struct NoticeBanner: View {
     }
 }
 
-// MARK: - Lighting analyzer
+// MARK: - Lighting analyzer (UNCHANGED)
 
 private enum LightingQuality {
     case good
@@ -614,22 +561,5 @@ private final class LightingAnalyzer {
         }
         if b < 0.26 { return .dim(score: b) }
         return .good
-    }
-}
-
-private enum ConversationIdProvider {
-    static func fromText(_ text: String) -> String {
-        // Stable “conversation” id for a given document text
-        // (so PDFs can be rediscovered later)
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "doc-\(sha256Hex(trimmed))"
-    }
-
-    private static func sha256Hex(_ s: String) -> String {
-        // Simple stable hash. If you already have CryptoKit, use SHA256 there instead.
-        // This fallback is fine for an id, not for security.
-        var hasher = Hasher()
-        hasher.combine(s)
-        return String(hasher.finalize())
     }
 }

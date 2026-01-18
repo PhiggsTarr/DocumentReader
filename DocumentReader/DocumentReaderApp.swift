@@ -10,12 +10,14 @@ import SwiftUI
 @main
 struct DocumentReaderApp: App {
     let persistence = PersistenceController.shared
+    @StateObject private var purchaseManager = PurchaseManager.shared
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(\.managedObjectContext, persistence.container.viewContext)
+                .environmentObject(purchaseManager)
+                .termsGate()
         }
     }
 }
-

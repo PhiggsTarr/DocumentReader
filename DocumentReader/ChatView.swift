@@ -420,7 +420,7 @@ Draft the actual letter now as a PDF-ready draft.
                 _ = try persistNewPDFVersion(from: draft, assistantReply: resp.reply)
 
                 // ✅ FIX: if the PDF was created, always show success in the chat.
-                assistantReply = "✅ PDF created. Use **PDF Draft Ready** above to share/export. (Not legal advice.)"
+                assistantReply = "✅ PDF created. Use **PDF Draft Ready** above to share/export. (Not legal advice.) Please let me know if there are any errors and I'll happily re-draft your PDF!"
             }
 
             if let idx = messages.firstIndex(where: { $0.id == thinkingId }) {
