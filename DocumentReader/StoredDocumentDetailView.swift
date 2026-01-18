@@ -5,23 +5,13 @@
 //  Created by Gboinyee Tarr on 1/14/26.
 //
 
-//
-//  StoredDocumentDetailView.swift
-//  DocumentReader
-//
-//  Created by Gboinyee Tarr on 1/14/26.
-//
-
 import SwiftUI
 
 struct StoredDocumentDetailView: View {
     let document: StoredDocument
     @State private var analyses: [StoredAnalysis] = []
 
-    // Latest analysis = first after sorting (newest first)
-    private var latestAnalysis: StoredAnalysis? {
-        analyses.first
-    }
+    private var latestAnalysis: StoredAnalysis? { analyses.first }
 
     var body: some View {
         ZStack {
@@ -40,10 +30,17 @@ struct StoredDocumentDetailView: View {
         .navigationTitle("Document")
         .navigationBarTitleDisplayMode(.inline)
         .polishedNavBar()
-        .task {
-            let set = (document.analyses as? Set<StoredAnalysis>) ?? []
-            analyses = set.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+        .task(id: document.objectID) {
+            reloadAnalyses()
         }
+        .onAppear {
+            reloadAnalyses()
+        }
+    }
+
+    private func reloadAnalyses() {
+        let set = (document.analyses as? Set<StoredAnalysis>) ?? []
+        analyses = set.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
     }
 
     private var documentCard: some View {

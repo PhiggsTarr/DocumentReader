@@ -9,7 +9,6 @@ import Foundation
 import CoreData
 import CryptoKit
 
-
 @MainActor
 final class DocumentStore: ObservableObject {
     private let container: NSPersistentContainer
@@ -18,44 +17,34 @@ final class DocumentStore: ObservableObject {
         self.container = container
     }
 
+    // MARK: - Save (single analysis helper)
 
-        // MARK: - Save
+    /// Saves an analysis result into Core Data under a StoredDocument.
+    @discardableResult
+    func saveAnalysis(
+        result: DocumentAnalyzeResponse,
+        for document: StoredDocument,
+        in context: NSManagedObjectContext
+    ) throws -> StoredAnalysis {
 
-        /// Saves an analysis result into Core Data under a StoredDocument.
-        @discardableResult
-        func saveAnalysis(
-            result: DocumentAnalyzeResponse,
-            for document: StoredDocument,
-            in context: NSManagedObjectContext
-        ) throws -> StoredAnalysis {
+        let a = StoredAnalysis(context: context)
 
-            let a = StoredAnalysis(context: context)
+        a.createdAt = Date()
+        a.docType = result.docType
+        a.confidence = result.confidence ?? 0
 
-            a.createdAt = Date()
-            a.docType = result.docType
-            a.confidence = result.confidence ?? 0
+        // ✅ Store summary directly on StoredAnalysis (Option A)
+        a.summaryPlain = result.summaryPlain
 
-            // ✅ Option A: store summary on the StoredAnalysis row
-            a.summaryPlain = result.summaryPlain
+        // Link
+        a.document = document
 
-            // Link
-            a.document = document
+        try context.save()
+        return a
+    }
 
-            try context.save()
-            return a
-        }
+    // MARK: - Exists
 
-        // MARK: - Decode
-
-        /// If you already store the full JSON response somewhere (StoredAnalysis.rawJSON etc),
-        /// keep this function for your SavedAnalysisDetailView.
-        ///
-        /// If you do NOT store raw JSON, you can still show the Saved Analysis UI by
-        /// fetching the original document text and re-running analysis — but your app
-        /// already has saved analysis JSON based on your earlier code, so this stays.
-
-
-    
     func existsDocument(withTextHash hash: String) throws -> StoredDocument? {
         let request = StoredDocument.fetchRequest()
         request.fetchLimit = 1
@@ -63,16 +52,13 @@ final class DocumentStore: ObservableObject {
         return try container.viewContext.fetch(request).first
     }
 
-
-    
-    
     func sha256(_ input: String) -> String {
         let data = Data(input.utf8)
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    // MARK: - Save a new document + analysis (or append analysis to an existing document)
+    // MARK: - Save a new document + analysis
 
     func saveDocument(
         title: String?,
@@ -102,6 +88,9 @@ final class DocumentStore: ObservableObject {
         stored.docType = analysis.docType
         stored.confidence = analysis.confidence ?? 0
 
+        // ✅ FIX: this was missing, causing your summary to always be nil
+        stored.summaryPlain = analysis.summaryPlain
+
         if let wb = analysis.whoBenefitsMost {
             stored.whoBenefitsMostParty = wb.party
             stored.whoBenefitsMostConfidence = wb.confidence
@@ -111,8 +100,6 @@ final class DocumentStore: ObservableObject {
 
         // Link
         stored.document = doc
-        
-
 
         try context.save()
     }
@@ -132,6 +119,8 @@ final class DocumentStore: ObservableObject {
         stored.exportText = exportText
         stored.docType = analysis.docType
         stored.confidence = analysis.confidence ?? 0
+
+        // ✅ Keep storing summary on every analysis row
         stored.summaryPlain = analysis.summaryPlain
 
         if let wb = analysis.whoBenefitsMost {
