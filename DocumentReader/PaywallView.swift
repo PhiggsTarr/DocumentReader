@@ -15,6 +15,7 @@ struct PaywallView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+
                     Card("Upgrade", icon: "lock.open.fill", tint: .mint) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("You’ve used your free scan.")
@@ -69,6 +70,21 @@ struct PaywallView: View {
                                 .padding(.vertical, 6)
                             }
                             .buttonStyle(.bordered)
+
+                            Button {
+                                purchaseManager.openManageSubscriptions()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "person.crop.circle.badge.checkmark")
+                                    Text("Manage Subscription")
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
 
@@ -76,6 +92,29 @@ struct PaywallView: View {
                         Card("Purchase Error", icon: "exclamationmark.triangle.fill", tint: .red) {
                             Text(err)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // ✅ Terms/Privacy footer (App Store review expectation)
+                    Card(nil) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("By continuing, you agree to our Terms and Privacy Policy.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 12) {
+                                NavigationLink("Terms") {
+                                    TermsAndConditionsView { }
+                                }
+                                .font(.footnote.weight(.semibold))
+
+                                NavigationLink("Privacy Policy") {
+                                    PrivacyPolicyView()
+                                }
+                                .font(.footnote.weight(.semibold))
+
+                                Spacer()
+                            }
                         }
                     }
 

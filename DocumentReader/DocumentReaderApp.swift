@@ -14,10 +14,9 @@ struct DocumentReaderApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environment(\.managedObjectContext, persistence.container.viewContext)
                 .environmentObject(purchaseManager)
-                .termsGate()
         }
     }
 }

@@ -17,7 +17,7 @@ final class AnalysisProgressModel: ObservableObject {
     @Published var statusText: String = "Analyzing"
 
     /// Lottie file name (NO .json)
-    let lottieName: String = "Book Loader (3)"
+    let lottieName: String = "BookFlipper"
 
     private let statuses = ["Analyzing", "Interpreting", "Researching", "Summarizing", "Drafting"]
     private var statusIndex: Int = 0

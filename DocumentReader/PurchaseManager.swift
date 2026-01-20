@@ -5,13 +5,14 @@
 
 import Foundation
 import StoreKit
+import UIKit
 
 @MainActor
 final class PurchaseManager: ObservableObject {
     static let shared = PurchaseManager()
 
-    // ✅ Replace with your App Store Connect product id
-    private let proProductId = "com.yourcompany.documentreader.pro"
+    // ✅ Use your real product id
+    private let proProductId = "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan"
 
     @Published private(set) var isPro: Bool = false
     @Published private(set) var freeScansRemaining: Int = 1
@@ -21,16 +22,15 @@ final class PurchaseManager: ObservableObject {
     private let defaults = UserDefaults.standard
     private let freeKey = "scan.free.remaining.v1"
 
+    
     private init() {
-        // Load free scans from disk (defaults to 1)
         if defaults.object(forKey: freeKey) == nil {
-            defaults.set(1, forKey: freeKey)
+            defaults.set(2, forKey: freeKey)
         }
         freeScansRemaining = defaults.integer(forKey: freeKey)
     }
 
     func refreshEntitlements() async {
-        // Check current entitlements
         var proActive = false
         for await result in Transaction.currentEntitlements {
             if case .verified(let transaction) = result {
@@ -43,16 +43,16 @@ final class PurchaseManager: ObservableObject {
         isPro = proActive
     }
 
+    func canScan() -> Bool {
+        if isPro { return true }
+        return freeScansRemaining > 0
+    }
+
     func consumeFreeScanIfNeeded() {
         guard !isPro else { return }
         guard freeScansRemaining > 0 else { return }
         freeScansRemaining -= 1
         defaults.set(freeScansRemaining, forKey: freeKey)
-    }
-
-    func canScan() -> Bool {
-        if isPro { return true }
-        return freeScansRemaining > 0
     }
 
     func purchasePro() async {
@@ -103,4 +103,22 @@ final class PurchaseManager: ObservableObject {
             lastErrorMessage = error.localizedDescription
         }
     }
+
+    // MARK: - Manage subscriptions (Apple UI)
+
+    func openManageSubscriptions() {
+        // Apple’s official subscriptions management page (opens App Store / Settings)
+        guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
+        UIApplication.shared.open(url)
+    }
+
+    // MARK: - Debug tooling
+
+//    #if DEBUG
+//    func debugResetFreeScans() {
+//        freeScansRemaining = 1
+//        defaults.set(1, forKey: freeKey)
+//        UINotificationFeedbackGenerator().notificationOccurred(.success)
+//    }
+//    #endif
 }

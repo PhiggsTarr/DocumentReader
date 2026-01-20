@@ -17,7 +17,7 @@ struct ContentView: View {
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var activeConversationId: String = UUID().uuidString
-
+    
     @State private var showScanner = false
     @State private var ocrTextPreview: String = ""
 
@@ -25,8 +25,8 @@ struct ContentView: View {
     @StateObject private var progressModel = AnalysisProgressModel()
 
     @State private var showPaywall = false
+    @State private var showSettings = false
 
-    // Lighting guidance
     @State private var lightingWarning: String? = nil
     @State private var showDimLightAlert: Bool = false
 
@@ -78,7 +78,7 @@ struct ContentView: View {
                     .padding(.top, 12)
                 }
             }
-            .navigationTitle("Document Reader")
+            .navigationTitle("Document Scanner")
             .navigationBarTitleDisplayMode(.inline)
             .polishedNavBar()
 
@@ -111,11 +111,21 @@ struct ContentView: View {
             }
 
             .alert("Low light detected", isPresented: $showDimLightAlert) {
-                Button("Rescan") { attemptStartScan() }
+                Button("Rescan") { showScanner = true }
                 Button("Continue", role: .cancel) { }
             } message: {
                 Text("Turn on a lamp or move near a window. Avoid shadows and glare for accurate scan.")
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                    }
+                }
+            }
+
         }
         .overlay {
             if progressModel.isPresented {
@@ -203,7 +213,7 @@ struct ContentView: View {
         if ScanGate.canStartScan(purchaseManager: purchaseManager) {
             // Consume the free scan *at scan start* (so backing out of scanner still counts as an attempt).
             // If you want to only consume after a successful scan, move this call into `handleScan(...)` right before OCR.
-            purchaseManager.consumeFreeScanIfNeeded()
+           // purchaseManager.consumeFreeScanIfNeeded()
 
             showScanner = true
         } else {
@@ -456,6 +466,7 @@ struct ContentView: View {
             }
 
             progressModel.moveTo(cap: 0.45)
+            purchaseManager.consumeFreeScanIfNeeded()
             let text = try await ocrService.recognizeText(from: images)
             ocrTextPreview = text.isEmpty ? "(No text found)" : text
 

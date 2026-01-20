@@ -2,9 +2,6 @@
 //  TermsGateModifier.swift
 //  DocumentReader
 //
-//  Created by Gboinyee Tarr on 1/18/26.
-//
-
 
 import SwiftUI
 
@@ -15,9 +12,14 @@ private enum TermsStorage {
 struct TermsGateModifier: ViewModifier {
     @State private var accepted: Bool = UserDefaults.standard.bool(forKey: TermsStorage.acceptedKey)
 
+    private var shouldShowGate: Bool { !accepted }
+
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(isPresented: .constant(!accepted)) {
+            .fullScreenCover(isPresented: Binding(
+                get: { shouldShowGate },
+                set: { _ in } // no-op; acceptance drives dismissal
+            )) {
                 TermsAndConditionsView {
                     accepted = true
                     UserDefaults.standard.set(true, forKey: TermsStorage.acceptedKey)
@@ -31,4 +33,3 @@ extension View {
         modifier(TermsGateModifier())
     }
 }
-

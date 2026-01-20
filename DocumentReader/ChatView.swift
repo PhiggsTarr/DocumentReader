@@ -190,14 +190,14 @@ Rules:
     private var header: some View {
         Card(nil) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Context loaded")
+                Text("Document Discussion")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                Text(documentText)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+//                Text(documentText)
+//                    .font(.footnote)
+//                    .foregroundStyle(.secondary)
+//                    .lineLimit(2)
             }
         }
         .padding(.horizontal, DS.pagePadding)
