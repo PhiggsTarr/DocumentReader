@@ -54,8 +54,8 @@
             filePath = "DocumentReader/PurchaseManager.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "79"
-            endingLineNumber = "79"
+            startingLineNumber = "83"
+            endingLineNumber = "83"
             landmarkName = "purchasePro()"
             landmarkType = "7">
          </BreakpointContent>
