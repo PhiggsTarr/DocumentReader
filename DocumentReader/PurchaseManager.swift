@@ -44,7 +44,9 @@ final class PurchaseManager: ObservableObject {
     }
 
     func canScan() -> Bool {
-        if isPro { return true }
+        if isPro {
+            freeScansRemaining += 10
+            return true }
         return freeScansRemaining > 0
     }
 
@@ -73,6 +75,7 @@ final class PurchaseManager: ObservableObject {
             case .success(let verification):
                 switch verification {
                 case .verified(let transaction):
+                    freeScansRemaining += 10
                     await transaction.finish()
                     await refreshEntitlements()
                 case .unverified:
