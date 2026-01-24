@@ -5,6 +5,13 @@
 //  Home screen + scan tips + low-light detection
 //
 
+//
+//  ContentView.swift
+//  DocumentReader
+//
+//  Home screen + scan tips + low-light detection
+//
+
 import SwiftUI
 import UIKit
 import CoreImage
@@ -17,12 +24,15 @@ struct ContentView: View {
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var activeConversationId: String = UUID().uuidString
-    
+
     @State private var showScanner = false
     @State private var ocrTextPreview: String = ""
 
     @StateObject private var recents = RecentDocumentsStore()
     @StateObject private var progressModel = AnalysisProgressModel()
+
+    // ✅ Cancellable analysis task (so user can cancel and keep scan credit)
+    @State private var analysisTask: Task<Void, Never>? = nil
 
     @State private var showPaywall = false
     @State private var showSettings = false
@@ -86,7 +96,12 @@ struct ContentView: View {
                 DocumentScannerView(
                     onComplete: { images in
                         showScanner = false
-                        Task { await handleScan(images: images) }
+
+                        // ✅ Cancel any previous run (safety)
+                        analysisTask?.cancel()
+
+                        // ✅ Kick off cancellable flow
+                        analysisTask = Task { await handleScan(images: images) }
                     },
                     onCancel: { showScanner = false },
                     onError: { err in
@@ -125,11 +140,16 @@ struct ContentView: View {
                     }
                 }
             }
-
         }
         .overlay {
             if progressModel.isPresented {
-                AnalysisProgressOverlay(model: progressModel)
+                // ✅ If your overlay already supports an onCancel closure, use this init:
+                AnalysisProgressOverlay(model: progressModel) {
+                    cancelCurrentAnalysis()
+                }
+
+                // If your current AnalysisProgressOverlay has no closure init,
+                // add one (a cancel button) and call `onCancel()` from it.
             }
         }
         .environmentObject(recents)
@@ -157,7 +177,6 @@ struct ContentView: View {
                 Pill(text: "Not legal advice", icon: "shield.lefthalf.filled", tone: .warning)
             }
 
-            // Optional: subtle remaining/free indicator
             if !purchaseManager.isPro {
                 Text("Free scans remaining: \(purchaseManager.freeScansRemaining)")
                     .font(.caption)
@@ -211,10 +230,8 @@ struct ContentView: View {
         guard !isLoading else { return }
 
         if ScanGate.canStartScan(purchaseManager: purchaseManager) {
-            // Consume the free scan *at scan start* (so backing out of scanner still counts as an attempt).
-            // If you want to only consume after a successful scan, move this call into `handleScan(...)` right before OCR.
-           // purchaseManager.consumeFreeScanIfNeeded()
-
+            // ✅ IMPORTANT: do NOT consume a scan credit here.
+            // We will consume ONLY after analysis succeeds, so canceling keeps the credit.
             showScanner = true
         } else {
             showPaywall = true
@@ -436,6 +453,20 @@ struct ContentView: View {
         .foregroundStyle(.primary)
     }
 
+    // MARK: - Cancel
+
+    @MainActor
+    private func cancelCurrentAnalysis() {
+        analysisTask?.cancel()
+        analysisTask = nil
+
+        // Stop UI
+        progressModel.stop()
+        isLoading = false
+
+        // ✅ No credit was consumed yet, so cancel keeps the scan credit automatically.
+    }
+
     // MARK: - Flow
 
     @MainActor
@@ -454,6 +485,8 @@ struct ContentView: View {
         defer { isLoading = false }
 
         do {
+            try Task.checkCancellation()
+
             let lighting = LightingAnalyzer.evaluate(images: images)
             if case .dim = lighting {
                 lightingWarning =
@@ -466,8 +499,11 @@ struct ContentView: View {
             }
 
             progressModel.moveTo(cap: 0.45)
-            purchaseManager.consumeFreeScanIfNeeded()
+            try Task.checkCancellation()
+
             let text = try await ocrService.recognizeText(from: images)
+            try Task.checkCancellation()
+
             ocrTextPreview = text.isEmpty ? "(No text found)" : text
 
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -480,14 +516,25 @@ struct ContentView: View {
             lastDocumentText = trimmed
             progressModel.moveTo(cap: 0.90)
 
+            try Task.checkCancellation()
+
             let result = try await apiClient.analyzeDocument(text: trimmed)
 
+            try Task.checkCancellation()
+
+            // ✅ SUCCESS
             analysisResult = result
             recents.add(fullText: trimmed, analysis: result)
             progressModel.finishAndDismiss()
-
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
+            // ✅ Consume scan credit ONLY after we have a successful analysis result
+            purchaseManager.consumeFreeScanIfNeeded()
+
+        } catch is CancellationError {
+            // User canceled mid-flight → keep credit (we haven’t consumed it yet)
+            progressModel.stop()
+            return
         } catch {
             progressModel.stop()
             errorMessage = error.localizedDescription

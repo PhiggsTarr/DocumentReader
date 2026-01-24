@@ -120,7 +120,7 @@ We use reasonable safeguards designed to protect data in transit and to reduce u
 
                             Text("""
 If you have questions or privacy requests (including deletion requests), contact:
-support@yourcompany.com
+NerdInventions@gmail.com
 """)
                             .font(.footnote)
                             .foregroundStyle(.secondary)

@@ -11,41 +11,75 @@ import UIKit
 final class PurchaseManager: ObservableObject {
     static let shared = PurchaseManager()
 
-    // ✅ Use your real product id
-    private let proProductId = "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan"
+    // MARK: - Product IDs
+
+    // Pro: subscription that enables unlimited scans
+    let proProductId = "com.nerdinventions.smartfriendlegaltranslator.monthly_scans"
+
+    // Scan packs: should be CONSUMABLE products in App Store Connect
+    let scanPack5ProductId  = "com.NerdInventions.SmartFriendLegalTranslator.5IndividualScans"
+    let scanPack10ProductId = "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan"
+
+    // MARK: - Published state
 
     @Published private(set) var isPro: Bool = false
-    @Published private(set) var freeScansRemaining: Int = 1
+    @Published private(set) var freeScansRemaining: Int = 0
+
+    // Use this to display both errors + friendly info messages in UI
     @Published var lastErrorMessage: String? = nil
-    @Published var isPurchasing: Bool = false
+
+    // ✅ Track which product is being purchased (so only one button shows loading)
+    @Published private(set) var purchasingProductId: String? = nil
+
+    // Optional: to show prices
+    @Published private(set) var proProduct: Product? = nil
+    @Published private(set) var scanPack5Product: Product? = nil
+    @Published private(set) var scanPack10Product: Product? = nil
 
     private let defaults = UserDefaults.standard
-    private let freeKey = "scan.free.remaining.v1"
+    private let scansKey = "scan.remaining.v3"
 
-    
+    private var transactionUpdatesTask: Task<Void, Never>? = nil
+
     private init() {
-        if defaults.object(forKey: freeKey) == nil {
-            defaults.set(2, forKey: freeKey)
+        // ✅ Only set the default if it doesn't exist
+        if defaults.object(forKey: scansKey) == nil {
+            defaults.set(2, forKey: scansKey)
         }
-        freeScansRemaining = defaults.integer(forKey: freeKey)
-    }
+        freeScansRemaining = defaults.integer(forKey: scansKey)
 
-    func refreshEntitlements() async {
-        var proActive = false
-        for await result in Transaction.currentEntitlements {
-            if case .verified(let transaction) = result {
-                if transaction.productID == proProductId {
-                    proActive = true
-                    break
+        // Keep entitlements synced if Apple updates transactions while app is running
+        transactionUpdatesTask = Task { [weak self] in
+            guard let self else { return }
+            for await update in Transaction.updates {
+                if case .verified(let transaction) = update {
+                    await self.handleVerifiedTransaction(transaction)
+                    await transaction.finish()
                 }
             }
         }
-        isPro = proActive
     }
 
+    deinit {
+        transactionUpdatesTask?.cancel()
+    }
+
+    // MARK: - UI helpers
+
+    var isPurchasingAny: Bool { purchasingProductId != nil }
+
+    func isPurchasing(productId: String) -> Bool {
+        purchasingProductId == productId
+    }
+
+    var isPurchasingPro: Bool { purchasingProductId == proProductId }
+    var isPurchasingPack5: Bool { purchasingProductId == scanPack5ProductId }
+    var isPurchasingPack10: Bool { purchasingProductId == scanPack10ProductId }
+
+    // MARK: - Scan gating
+
     func canScan() -> Bool {
-        if isPro {
-            return true }
+        if isPro { return true }
         return freeScansRemaining > 0
     }
 
@@ -53,16 +87,89 @@ final class PurchaseManager: ObservableObject {
         guard !isPro else { return }
         guard freeScansRemaining > 0 else { return }
         freeScansRemaining -= 1
-        defaults.set(freeScansRemaining, forKey: freeKey)
+        defaults.set(freeScansRemaining, forKey: scansKey)
     }
 
+    func addScans(_ count: Int) {
+        guard count > 0 else { return }
+        freeScansRemaining += count
+        defaults.set(freeScansRemaining, forKey: scansKey)
+    }
+
+    // MARK: - Friendly messages
+
+    func showAlreadyUnlimitedMessage() {
+        lastErrorMessage = "You already have Unlimited Scans with Pro. No need to buy scan packs."
+    }
+
+    private func shouldBlockScanPackPurchase() -> Bool {
+        if isPro {
+            showAlreadyUnlimitedMessage()
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Entitlements + product loading
+
+    func refreshEntitlements() async {
+        await loadProducts()
+
+        var proActive = false
+
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result else { continue }
+
+            if transaction.productID == proProductId {
+                // Extra safety: revoked subscriptions shouldn't count
+                if transaction.revocationDate == nil {
+                    proActive = true
+                }
+            }
+        }
+
+        isPro = proActive
+    }
+
+    private func loadProducts() async {
+        do {
+            let ids = [proProductId, scanPack5ProductId, scanPack10ProductId]
+            let products = try await Product.products(for: ids)
+
+            self.proProduct = products.first(where: { $0.id == proProductId })
+            self.scanPack5Product = products.first(where: { $0.id == scanPack5ProductId })
+            self.scanPack10Product = products.first(where: { $0.id == scanPack10ProductId })
+        } catch {
+            print("⚠️ Failed to load products:", error.localizedDescription)
+        }
+    }
+
+    // MARK: - Purchases
+
     func purchasePro() async {
+        await purchase(productId: proProductId, grantScans: nil)
+    }
+
+    func purchaseScanPack5() async {
+        if shouldBlockScanPackPurchase() { return }
+        await purchase(productId: scanPack5ProductId, grantScans: 5)
+    }
+
+    func purchaseScanPack10() async {
+        if shouldBlockScanPackPurchase() { return }
+        await purchase(productId: scanPack10ProductId, grantScans: 10)
+    }
+
+    private func purchase(productId: String, grantScans: Int?) async {
+        // ✅ Prevent overlapping purchases without disabling UI
+        guard purchasingProductId == nil else { return }
+
         lastErrorMessage = nil
-        isPurchasing = true
-        defer { isPurchasing = false }
+        purchasingProductId = productId
+        defer { purchasingProductId = nil }
 
         do {
-            let products = try await Product.products(for: [proProductId])
+            let products = try await Product.products(for: [productId])
             guard let product = products.first else {
                 lastErrorMessage = "Unable to load purchase option."
                 return
@@ -74,14 +181,13 @@ final class PurchaseManager: ObservableObject {
             case .success(let verification):
                 switch verification {
                 case .verified(let transaction):
-                    freeScansRemaining += 10
-                    if defaults.object(forKey: freeKey) == nil {
-                        defaults.set(10, forKey: freeKey)
-                    } else {
-                        defaults.set(defaults.object(forKey: freeKey) as! Int + 10, forKey: freeKey)
+                    if let n = grantScans {
+                        addScans(n)
                     }
+
                     await transaction.finish()
                     await refreshEntitlements()
+
                 case .unverified:
                     lastErrorMessage = "Purchase could not be verified."
                 }
@@ -101,6 +207,23 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
+    private func handleVerifiedTransaction(_ transaction: Transaction) async {
+        if transaction.productID == proProductId {
+            await refreshEntitlements()
+            return
+        }
+
+        if transaction.productID == scanPack5ProductId {
+            addScans(5)
+            return
+        }
+
+        if transaction.productID == scanPack10ProductId {
+            addScans(10)
+            return
+        }
+    }
+
     func restorePurchases() async {
         lastErrorMessage = nil
         do {
@@ -111,21 +234,10 @@ final class PurchaseManager: ObservableObject {
         }
     }
 
-    // MARK: - Manage subscriptions (Apple UI)
+    // MARK: - Manage subscriptions
 
     func openManageSubscriptions() {
-        // Apple’s official subscriptions management page (opens App Store / Settings)
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         UIApplication.shared.open(url)
     }
-
-    // MARK: - Debug tooling
-
-//    #if DEBUG
-//    func debugResetFreeScans() {
-//        freeScansRemaining = 1
-//        defaults.set(1, forKey: freeKey)
-//        UINotificationFeedbackGenerator().notificationOccurred(.success)
-//    }
-//    #endif
 }

@@ -26,15 +26,60 @@
         }
       ],
       "productID" : "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan",
-      "referenceName" : "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan",
+      "referenceName" : "10 Scans",
       "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "6758199907",
+      "localizations" : [
+        {
+          "description" : "5 Scans",
+          "displayName" : "5 Scans",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.NerdInventions.SmartFriendLegalTranslator.5IndividualScans",
+      "referenceName" : "5 Scans",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "6758200131",
+      "localizations" : [
+        {
+          "description" : "Unlock Pro Unlimited Monthly Scans",
+          "displayName" : "Unlock Pro Unlimited Monthly Scans",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.NerdInventions.SmartFriendLegalTranslator.ProUnlimitedScans",
+      "referenceName" : "Pro Unlimited Scans",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "6758233099",
+      "localizations" : [
+        {
+          "description" : "Unlock Pro Unlimited Monthly Scans",
+          "displayName" : "Unlock Pro Unlimited Monthly Scans",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.NerdInventions.SmartFriendLegalTranslator.ProUnlimitedScansPackage",
+      "referenceName" : "ProUnlimitedScansPackage",
+      "type" : "NonConsumable"
     }
   ],
   "settings" : {
     "_applicationInternalID" : "6757992558",
     "_developerTeamID" : "343NX53M5H",
     "_failTransactionsEnabled" : false,
-    "_lastSynchronizedDate" : 790578567.446064,
+    "_lastSynchronizedDate" : 790966366.72352505,
     "_locale" : "en_US",
     "_storefront" : "USA",
     "_storeKitErrors" : [
@@ -86,7 +131,43 @@
     ]
   },
   "subscriptionGroups" : [
+    {
+      "id" : "21896917",
+      "localizations" : [
 
+      ],
+      "name" : "Monthly Scans",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6757992646",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Pro Unlimited Monthly Scans",
+              "displayName" : "Pro Unlimited Monthly Scans",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.nerdinventions.smartfriendlegaltranslator.monthly_scans",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly Scans",
+          "subscriptionGroupID" : "21896917",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
   ],
   "version" : {
     "major" : 4,

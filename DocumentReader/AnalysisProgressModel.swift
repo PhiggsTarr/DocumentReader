@@ -88,15 +88,18 @@ final class AnalysisProgressModel: ObservableObject {
 
 // MARK: - Overlay UI
 
+import SwiftUI
+
 struct AnalysisProgressOverlay: View {
     @ObservedObject var model: AnalysisProgressModel
+    let onCancel: () -> Void
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.45).ignoresSafeArea()
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                // ✅ Stage with camera controls (zoom/offset)
                 LottieStage(
                     animationName: model.lottieName,
                     speed: 2.2,                         // faster flips
@@ -120,6 +123,18 @@ struct AnalysisProgressOverlay: View {
                 Text("Working on your document…")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+
+                Divider().opacity(0.25)
+
+                Button(role: .cancel) {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             .padding(22)
             .background(.ultraThinMaterial)
@@ -131,6 +146,7 @@ struct AnalysisProgressOverlay: View {
         .animation(.easeInOut(duration: 0.2), value: model.isPresented)
     }
 }
+
 
 // MARK: - Lottie Stage (frames + “camera”)
 
