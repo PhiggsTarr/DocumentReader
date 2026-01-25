@@ -44,7 +44,7 @@ final class PurchaseManager: ObservableObject {
     private init() {
         // ✅ Only set the default if it doesn't exist
         if defaults.object(forKey: scansKey) == nil {
-            defaults.set(2, forKey: scansKey)
+            defaults.set(1, forKey: scansKey)
         }
         freeScansRemaining = defaults.integer(forKey: scansKey)
 

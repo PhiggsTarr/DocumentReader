@@ -204,7 +204,7 @@ struct ContentView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.viewfinder")
-                        Text(isLoading ? "Working…" : "Scan with Camera")
+                        Text(isLoading ? "Working…" : "Scan Document")
                             .fontWeight(.semibold)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -220,7 +220,7 @@ struct ContentView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.fill")
-                        Text("Import PDF")
+                        Text("Upload Document")
                             .fontWeight(.semibold)
                         Spacer()
                         Image(systemName: "arrow.up.doc")
