@@ -2,20 +2,15 @@
 //  ContentView.swift
 //  DocumentReader
 //
-//  Home screen + scan tips + low-light detection
-//
-
-//
-//  ContentView.swift
-//  DocumentReader
-//
-//  Home screen + scan tips + low-light detection
+//  Home screen + scan tips + low-light detection + PDF import
 //
 
 import SwiftUI
 import UIKit
 import CoreImage
 import CoreData
+import PDFKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var analysisResult: DocumentAnalyzeResponse? = nil
@@ -23,20 +18,17 @@ struct ContentView: View {
 
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
-    @State private var activeConversationId: String = UUID().uuidString
 
     @State private var showScanner = false
-    @State private var ocrTextPreview: String = ""
+    @State private var showPDFImporter = false
 
     @StateObject private var recents = RecentDocumentsStore()
     @StateObject private var progressModel = AnalysisProgressModel()
 
-    // ✅ Cancellable analysis task (so user can cancel and keep scan credit)
+    // Cancellable analysis task (so user can cancel and keep scan credit)
     @State private var analysisTask: Task<Void, Never>? = nil
 
     @State private var showPaywall = false
-    @State private var showSettings = false
-
     @State private var lightingWarning: String? = nil
     @State private var showDimLightAlert: Bool = false
 
@@ -92,15 +84,16 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .polishedNavBar()
 
+            // Camera scanner
             .sheet(isPresented: $showScanner) {
+                // IMPORTANT:
+                // This assumes your DocumentScannerView has this initializer:
+                // DocumentScannerView(onComplete:onCancel:onError:)
+                // If your scanner only takes onComplete, tell me its initializer and I’ll match it.
                 DocumentScannerView(
                     onComplete: { images in
                         showScanner = false
-
-                        // ✅ Cancel any previous run (safety)
                         analysisTask?.cancel()
-
-                        // ✅ Kick off cancellable flow
                         analysisTask = Task { await handleScan(images: images) }
                     },
                     onCancel: { showScanner = false },
@@ -110,10 +103,24 @@ struct ContentView: View {
                     }
                 )
             }
-            .sheet(isPresented: $showPaywall) {
-                NavigationStack {
-                    PaywallView()
+
+            // PDF Importer (Files app)
+            .fileImporter(
+                isPresented: $showPDFImporter,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    Task { await handleImportedPDF(url: url) }
+                case .failure(let err):
+                    errorMessage = err.localizedDescription
                 }
+            }
+
+            .sheet(isPresented: $showPaywall) {
+                NavigationStack { PaywallView() }
             }
 
             .alert("Error", isPresented: Binding(
@@ -131,11 +138,10 @@ struct ContentView: View {
             } message: {
                 Text("Turn on a lamp or move near a window. Avoid shadows and glare for accurate scan.")
             }
+
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        SettingsView()
-                    } label: {
+                    NavigationLink { SettingsView() } label: {
                         Image(systemName: "gearshape.fill")
                     }
                 }
@@ -143,18 +149,13 @@ struct ContentView: View {
         }
         .overlay {
             if progressModel.isPresented {
-                // ✅ If your overlay already supports an onCancel closure, use this init:
                 AnalysisProgressOverlay(model: progressModel) {
                     cancelCurrentAnalysis()
                 }
-
-                // If your current AnalysisProgressOverlay has no closure init,
-                // add one (a cancel button) and call `onCancel()` from it.
             }
         }
         .environmentObject(recents)
         .task {
-            // Keep entitlement fresh when app loads
             await purchaseManager.refreshEntitlements()
         }
     }
@@ -179,8 +180,9 @@ struct ContentView: View {
 
             if !purchaseManager.isPro {
                 Text("Free scans remaining: \(purchaseManager.freeScansRemaining)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .font(.title2)
+                    .fontWeight(.heavy)
+                    .foregroundStyle(.primary)
             } else {
                 Text("Pro unlocked")
                     .font(.caption)
@@ -191,17 +193,18 @@ struct ContentView: View {
         .padding(.horizontal, DS.pagePadding)
     }
 
-    // MARK: - Scan card
+    // MARK: - Scan card (Camera + PDF)
 
     private var scanCard: some View {
         Card("Scan", icon: "doc.viewfinder", tint: .blue) {
             VStack(spacing: 12) {
+
                 Button {
                     attemptStartScan()
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.viewfinder")
-                        Text(isLoading ? "Working…" : "Scan Document")
+                        Text(isLoading ? "Working…" : "Scan with Camera")
                             .fontWeight(.semibold)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -210,6 +213,22 @@ struct ContentView: View {
                     .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(isLoading)
+
+                Button {
+                    attemptImportPDF()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.fill")
+                        Text("Import PDF")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Image(systemName: "arrow.up.doc")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
                 .disabled(isLoading)
 
                 if isLoading {
@@ -230,15 +249,23 @@ struct ContentView: View {
         guard !isLoading else { return }
 
         if ScanGate.canStartScan(purchaseManager: purchaseManager) {
-            // ✅ IMPORTANT: do NOT consume a scan credit here.
-            // We will consume ONLY after analysis succeeds, so canceling keeps the credit.
             showScanner = true
         } else {
             showPaywall = true
         }
     }
 
-    // MARK: - Result preview + actions
+    private func attemptImportPDF() {
+        guard !isLoading else { return }
+
+        if ScanGate.canStartScan(purchaseManager: purchaseManager) {
+            showPDFImporter = true
+        } else {
+            showPaywall = true
+        }
+    }
+
+    // MARK: - Result preview + actions (DEFINED here so your "cannot find" errors go away)
 
     private func resultPreview(result: DocumentAnalyzeResponse) -> some View {
         Card("Latest result", icon: "sparkles", tint: .purple) {
@@ -252,13 +279,6 @@ struct ContentView: View {
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    NavigationLink {
-                        AnalysisResultView(result: result, documentText: lastDocumentText, canSave: false)
-                    } label: {
-                        EmptyView()
-                    }
-                    .opacity(0)
-                    .frame(width: 0, height: 0)
                 }
 
                 Text(result.summaryPlain ?? "No summary returned.")
@@ -296,9 +316,7 @@ struct ContentView: View {
     private var recentDocuments: some View {
         Card("Recent documents", icon: "clock.fill", tint: .gray) {
 
-            // --------------------------
             // 1) Recents
-            // --------------------------
             if recents.items.isEmpty {
                 Text("No recent documents yet. Scan something to get started.")
                     .foregroundStyle(.secondary)
@@ -360,9 +378,7 @@ struct ContentView: View {
                 }
             }
 
-            // --------------------------------
             // 2) Saved documents (CoreData)
-            // --------------------------------
             Divider().opacity(0.35)
                 .padding(.vertical, 6)
 
@@ -426,9 +442,7 @@ struct ContentView: View {
                     }
 
                     Button(role: .destructive) {
-                        for doc in savedDocs {
-                            context.delete(doc)
-                        }
+                        for doc in savedDocs { context.delete(doc) }
                         try? context.save()
                         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                     } label: {
@@ -453,21 +467,86 @@ struct ContentView: View {
         .foregroundStyle(.primary)
     }
 
+    // MARK: - PDF flow
+
+    @MainActor
+    private func handleImportedPDF(url: URL) async {
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let images = try renderPDF(url: url, maxPages: 12)
+            guard !images.isEmpty else {
+                errorMessage = "That PDF didn’t contain any renderable pages."
+                return
+            }
+
+            analysisTask?.cancel()
+            analysisTask = Task { await handleScan(images: images) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private enum PDFRenderError: LocalizedError {
+        case couldNotOpen
+        case noPages
+
+        var errorDescription: String? {
+            switch self {
+            case .couldNotOpen: return "Couldn’t open that PDF."
+            case .noPages: return "That PDF has no pages."
+            }
+        }
+    }
+
+    private func renderPDF(url: URL, maxPages: Int) throws -> [UIImage] {
+        guard let pdf = PDFDocument(url: url) else { throw PDFRenderError.couldNotOpen }
+        guard pdf.pageCount > 0 else { throw PDFRenderError.noPages }
+
+        let count = min(pdf.pageCount, maxPages)
+        var images: [UIImage] = []
+        images.reserveCapacity(count)
+
+        for index in 0..<count {
+            guard let page = pdf.page(at: index) else { continue }
+
+            let pageRect = page.bounds(for: .mediaBox)
+            let scale: CGFloat = 2.0
+            let size = CGSize(width: pageRect.width * scale, height: pageRect.height * scale)
+
+            let renderer = UIGraphicsImageRenderer(size: size)
+            let img = renderer.image { ctx in
+                UIColor.white.set()
+                ctx.fill(CGRect(origin: .zero, size: size))
+
+                ctx.cgContext.saveGState()
+                ctx.cgContext.scaleBy(x: scale, y: scale)
+                ctx.cgContext.translateBy(x: 0, y: pageRect.height)
+                ctx.cgContext.scaleBy(x: 1, y: -1)
+                page.draw(with: .mediaBox, to: ctx.cgContext)
+                ctx.cgContext.restoreGState()
+            }
+
+            images.append(img)
+        }
+
+        return images
+    }
+
     // MARK: - Cancel
 
     @MainActor
     private func cancelCurrentAnalysis() {
         analysisTask?.cancel()
         analysisTask = nil
-
-        // Stop UI
         progressModel.stop()
         isLoading = false
-
-        // ✅ No credit was consumed yet, so cancel keeps the scan credit automatically.
     }
 
-    // MARK: - Flow
+    // MARK: - Unified flow (Camera images OR PDF-rendered images)
 
     @MainActor
     private func handleScan(images: [UIImage]) async {
@@ -475,7 +554,6 @@ struct ContentView: View {
         errorMessage = nil
         analysisResult = nil
         lastDocumentText = ""
-        ocrTextPreview = ""
         lightingWarning = nil
         showDimLightAlert = false
 
@@ -504,8 +582,6 @@ struct ContentView: View {
             let text = try await ocrService.recognizeText(from: images)
             try Task.checkCancellation()
 
-            ocrTextPreview = text.isEmpty ? "(No text found)" : text
-
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard trimmed.count >= 30 else {
                 progressModel.stop()
@@ -519,20 +595,17 @@ struct ContentView: View {
             try Task.checkCancellation()
 
             let result = try await apiClient.analyzeDocument(text: trimmed)
-
             try Task.checkCancellation()
 
-            // ✅ SUCCESS
             analysisResult = result
             recents.add(fullText: trimmed, analysis: result)
             progressModel.finishAndDismiss()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
-            // ✅ Consume scan credit ONLY after we have a successful analysis result
+            // Consume scan credit ONLY after successful analysis
             purchaseManager.consumeFreeScanIfNeeded()
 
         } catch is CancellationError {
-            // User canceled mid-flight → keep credit (we haven’t consumed it yet)
             progressModel.stop()
             return
         } catch {
@@ -543,7 +616,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Local subviews (UNCHANGED)
+// MARK: - Local subviews
 
 private struct NoticeBanner: View {
     let title: String
