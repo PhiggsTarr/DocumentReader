@@ -17,6 +17,7 @@ struct DocumentReaderApp: App {
             RootView()
                 .environment(\.managedObjectContext, persistence.container.viewContext)
                 .environmentObject(purchaseManager)
+                .preferredColorScheme(.dark)
         }
     }
 }
