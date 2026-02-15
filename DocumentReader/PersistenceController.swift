@@ -7,22 +7,18 @@
 
 import CoreData
 
-struct PersistenceController {
+final class PersistenceController {
     static let shared = PersistenceController()
 
     let container: NSPersistentContainer
 
-    init(inMemory: Bool = false) {
-        container = NSPersistentContainer(name: "DocumentReaderModel") // <-- must match your .xcdatamodeld name
+    private init(inMemory: Bool = false) {
+        // ⚠️ Change this to your .xcdatamodeld name
+        // If your file is DocumentReader.xcdatamodeld then the name is "DocumentReader"
+        container = NSPersistentContainer(name: "DocumentReaderModel")
 
         if inMemory {
             container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
-        }
-
-        // ✅ Lightweight migration
-        if let desc = container.persistentStoreDescriptions.first {
-            desc.shouldMigrateStoreAutomatically = true
-            desc.shouldInferMappingModelAutomatically = true
         }
 
         container.loadPersistentStores { _, error in
@@ -31,7 +27,9 @@ struct PersistenceController {
             }
         }
 
-        container.viewContext.automaticallyMergesChangesFromParent = true
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.automaticallyMergesChangesFromParent = true
     }
 }
+
+

@@ -11,6 +11,7 @@ import SwiftUI
 struct DocumentReaderApp: App {
     let persistence = PersistenceController.shared
     @StateObject private var purchaseManager = PurchaseManager.shared
+    @StateObject private var store = DocumentStore()
 
     var body: some Scene {
         WindowGroup {
@@ -18,6 +19,7 @@ struct DocumentReaderApp: App {
                 .environment(\.managedObjectContext, persistence.container.viewContext)
                 .environmentObject(purchaseManager)
                 .preferredColorScheme(.dark)
+                .environmentObject(store)
         }
     }
 }
