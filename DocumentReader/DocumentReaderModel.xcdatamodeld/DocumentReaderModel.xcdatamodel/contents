@@ -6,8 +6,10 @@
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="docType" optional="YES" attributeType="String"/>
         <attribute name="exportText" optional="YES" attributeType="String"/>
+        <attribute name="fileURLString" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="summaryPlain" optional="YES" attributeType="String"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
         <attribute name="whoBenefitsMostConfidence" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="whoBenefitsMostParty" optional="YES" attributeType="String"/>
         <relationship name="document" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="StoredDocument" inverseName="analyses" inverseEntity="StoredDocument"/>

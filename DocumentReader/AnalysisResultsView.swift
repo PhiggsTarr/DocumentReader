@@ -11,27 +11,9 @@ struct AnalysisResultView: View {
     let result: DocumentAnalyzeResponse
     let documentText: String
     let canSave: Bool
-    @State private var isSaving = false
-    @State private var isSaved = false
-    @State private var saveToast: String?
-    @Environment(\.managedObjectContext) private var moc
-    @StateObject private var store = DocumentStore()
+
+    @EnvironmentObject private var store: DocumentStore
     @State private var copiedToast: String?
-    
-    private func saveToHistory() {
-        do {
-            try store.saveDocument(
-                title: result.docType ?? "Document",
-                documentText: documentText,
-                fileURL: nil, // or URL if you saved the PDF to disk
-                analysis: result,
-                exportText: exportText
-                
-            )
-        } catch {
-            print("Save failed: \(error)")
-        }
-    }
 
     private var exportText: String {
         var parts: [String] = []
@@ -52,7 +34,8 @@ struct AnalysisResultView: View {
         parts.append(result.summaryPlain ?? "(none)")
         parts.append("")
 
-        if let simple = result.simpleEnglish, !simple.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let simple = result.simpleEnglish,
+           !simple.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parts.append("Explain it to me in plain simple English:")
             parts.append(simple)
             parts.append("")
@@ -66,7 +49,8 @@ struct AnalysisResultView: View {
             parts.append("")
         }
 
-        if let analogy = result.eli5Analogy, !analogy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let analogy = result.eli5Analogy,
+           !analogy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             parts.append("ELI5 Analogy:")
             parts.append(analogy)
             parts.append("")
@@ -127,19 +111,19 @@ struct AnalysisResultView: View {
 
         return parts.joined(separator: "\n")
     }
+    
+    private func toast(_ msg: String) {
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        withAnimation(.easeInOut(duration: 0.15)) {
+            copiedToast = msg
+        }
+    }
 
     var body: some View {
         ZStack {
             ScreenBackground()
 
-
             ScrollView {
-//                Button {
-//                    saveToHistory()
-//                } label: {
-//                    Label("Save", systemImage: "tray.and.arrow.down")
-//                }
-//                .buttonStyle(.bordered)
                 VStack(spacing: 14) {
 
                     Card("Summary") {
@@ -215,7 +199,7 @@ struct AnalysisResultView: View {
 
                                         // Add spacing before every item except the first
                                         if index != 0 {
-                                            ThickDividerTwo()  // adjust this value to your desired spacing
+                                         //   ThickDividerTwo()  // adjust this value to your desired spacing
                                             Spacer()
                                                 .frame(height: 25)
                                         } else{
@@ -229,30 +213,30 @@ struct AnalysisResultView: View {
                                         Text(p.party.isEmpty ? "Unknown party" : p.party)
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
-                                        ThickDivider()
+                                      //  ThickDivider()
 
                                         if !p.benefits.isEmpty {
                                             sectionTitle("Benefits")
                                             bulletList(p.benefits)
-                                            ThickDivider()
+                                       //     ThickDivider()
                                         }
 
                                         if !p.liabilities.isEmpty {
                                             sectionTitle("Liabilities / obligations")
                                             bulletList(p.liabilities)
-                                            ThickDivider()
+                                        //    ThickDivider()
                                         }
 
                                         if !p.possiblePenalties.isEmpty {
                                             sectionTitle("Possible penalties / consequences")
                                             bulletList(p.possiblePenalties)
-                                            ThickDivider()
+                                         //   ThickDivider()
                                         }
 
                                         if !p.catches.isEmpty {
                                             sectionTitle("Catches / gotchas")
                                             bulletList(p.catches)
-                                            ThickDivider()
+                                           // ThickDivider()
                                         }
 
                                         if !p.rights.isEmpty {
@@ -271,7 +255,7 @@ struct AnalysisResultView: View {
                                                 }
                                             }
                                             if index != 0 {
-                                                ThickDividerTwo()
+                                             //   ThickDividerTwo()
                                             }
                                         }
                                     }
@@ -311,6 +295,20 @@ struct AnalysisResultView: View {
                             if let u = result.urgency?.level {
                                 row("Urgency", u)
                             }
+                        }
+                    }
+
+
+                    if let paras = result.analysisParagraphs, !paras.isEmpty {
+                        Card("Detailed analysis") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(paras.indices, id: \.self) { i in
+                                    Text(paras[i])
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    if i != paras.count - 1 { Divider().opacity(0.25) }
+                                }
+                            }
+                            .foregroundStyle(.secondary)
                         }
                     }
 
@@ -360,8 +358,14 @@ struct AnalysisResultView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    
-                    SaveAnalysisCard(canSave: canSave, result: result, documentText: documentText, exportText: exportText)
+
+                    SaveAnalysisCard(
+                        canSave: canSave,
+                        title: result.docType ?? "Document",
+                        documentText: documentText,
+                        analysis: result,
+                        exportText: exportText
+                    )
 
                     if let lim = result.limitations, !lim.isEmpty {
                         Card("Limitations") {
@@ -398,67 +402,50 @@ struct AnalysisResultView: View {
             }
         }
     }
-
+    
     private func sectionTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.headline)
-            .fontWeight(.bold)
-            .foregroundStyle(.primary)
-            .padding(.top, 4)
-    }
+          Text(text)
+              .font(.headline)
+              .fontWeight(.bold)
+              .foregroundStyle(.primary)
+              .padding(.top, 4)
+      }
 
-    private func bulletList(_ items: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(items, id: \.self) { s in
-                Text("• \(s)")
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
+      private func bulletList(_ items: [String]) -> some View {
+          VStack(alignment: .leading, spacing: 6) {
+              ForEach(items, id: \.self) { s in
+                  Text("• \(s)")
+                      .foregroundStyle(.secondary)
+              }
+          }
+      }
 
-    private func row(_ k: String, _ v: String) -> some View {
-        HStack {
-            Text(k)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(v)
-                .fontWeight(.semibold)
-        }
-        .font(.subheadline)
-    }
+      private func row(_ k: String, _ v: String) -> some View {
+          HStack {
+              Text(k)
+                  .foregroundStyle(.secondary)
+              Spacer()
+              Text(v)
+                  .fontWeight(.semibold)
+          }
+          .font(.subheadline)
+      }
 }
 
-
-struct ThickDivider: View {
-    var body: some View {
-        Rectangle()
-            .frame(height: 2)
-            .foregroundColor(.white.opacity(0.25))
-            .padding(.vertical, 4)
-    }
-}
-
-struct ThickDividerTwo: View {
-    var body: some View {
-        Rectangle()
-            .frame(height: 16)
-            .foregroundColor(.white.opacity(0.25))
-            .padding(.vertical, 4)
-    }
-}
+// MARK: - Save Card
 
 struct SaveAnalysisCard: View {
     let canSave: Bool
-    let result: DocumentAnalyzeResponse
+    let title: String
     let documentText: String
+    let analysis: DocumentAnalyzeResponse
     let exportText: String
+
+    @EnvironmentObject private var store: DocumentStore
 
     @State private var isSaving = false
     @State private var isSaved = false
     @State private var toast: String?
-
-    // Prefer injecting the store (see notes below). This is OK if DocumentStore is lightweight.
-    @StateObject private var store = DocumentStore()
 
     var body: some View {
         Group {
@@ -498,12 +485,7 @@ struct SaveAnalysisCard: View {
             }
         }
     }
-    func sha256(_ input: String) -> String {
-        let data = Data(input.utf8)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-    
+
     private func save() {
         guard !isSaving && !isSaved else {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -514,36 +496,47 @@ struct SaveAnalysisCard: View {
         isSaving = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
-        do {
-            let hash = sha256(documentText)
+        Task {
+            do {
+                let hash = sha256(documentText)
+                if let _ = try store.existsDocument(withTextHash: hash) {
+                    isSaved = true
+                    isSaving = false
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    toast = "Already saved"
+                    return
+                }
 
-            if let _ = try store.existsDocument(withTextHash: hash) {
+                try store.saveDocument(
+                    title: title,
+                    documentText: documentText,
+                    fileURL: nil,
+                    analysis: analysis,
+                    exportText: exportText
+                )
+
                 isSaved = true
                 isSaving = false
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                toast = "Already saved"
-                return
+                toast = "Saved"
+            } catch {
+                isSaving = false
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                toast = "Save failed: \(error.localizedDescription)"
             }
-
-            try store.saveDocument(
-                title: result.docType ?? "Document",
-                documentText: documentText,
-                fileURL: nil,
-                analysis: result,
-                exportText: exportText
-            )
-
-            isSaved = true
-            isSaving = false
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            toast = "Saved"
-        } catch {
-            isSaving = false
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
-            toast = "Save failed: \(error.localizedDescription)"
         }
     }
-}
+
+
+    private func sha256(_ input: String) -> String {
+        let digest = SHA256.hash(data: Data(input.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
+
+  }
+
+    
 
 
 
@@ -562,3 +555,7 @@ extension View {
         }
     }
 }
+
+
+//struct ThickDivider: View { var body: some View { Rectangle() .frame(height: 2) .foregroundColor(.white.opacity(0.25)) .padding(.vertical, 4) } }
+//struct ThickDividerTwo: View { var body: some View { Rectangle() .frame(height: 8) .foregroundColor(.white.opacity(0.25)) .padding(.vertical, 4) } }

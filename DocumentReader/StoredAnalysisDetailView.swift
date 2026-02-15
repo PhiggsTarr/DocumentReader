@@ -17,14 +17,16 @@ import UIKit
 
 struct StoredAnalysisDetailView: View {
     let stored: StoredAnalysis
-    let documentText: String
-
+    
     @State private var decoded: DocumentAnalyzeResponse?
     @State private var copiedToast: String?
 
     private let store = DocumentStore()
-
-    // ✅ Stable per-analysis conversationId
+    
+    private var documentText: String {
+        stored.document?.documentText ?? ""
+    }
+    
     private var conversationId: String {
         stored.objectID.uriRepresentation().absoluteString
     }
@@ -208,3 +210,23 @@ struct StoredAnalysisDetailView: View {
         return parts.joined(separator: "\n")
     }
 }
+
+
+extension DocumentStore {
+//    func decodeAnalysis(_ stored: StoredAnalysis) -> DocumentAnalyzeResponse? {
+//        guard let data = stored.analysisJSON else { return nil }   // ✅ Data?
+//        return decodeDocumentAnalyzeResponse(from: data)
+//    }
+
+    private func decodeDocumentAnalyzeResponse(from data: Data) -> DocumentAnalyzeResponse? {
+        do {
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(DocumentAnalyzeResponse.self, from: data)
+        } catch {
+            print("❌ decodeAnalysis failed:", error)
+            return nil
+        }
+    }
+}
+

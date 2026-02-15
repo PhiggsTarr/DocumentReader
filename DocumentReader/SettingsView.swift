@@ -115,7 +115,7 @@ struct SettingsView: View {
 
                             // ✅ Pro (Monthly)
                             SettingsActionRow(
-                                title: purchaseManager.isPro ? "Pro Active" : "Unlock Pro",
+                                title: purchaseManager.isPro ? "Pro Active" : "Unlimited Monthly Scans",
                                 subtitle: purchaseManager.isPro ? "You already have unlimited scans" : "Best for frequent users",
                                 leadingSystemImage: "crown.fill",
                                 trailingText: purchaseManager.proProduct?.displayPrice,
@@ -160,7 +160,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                            ThickDivider()
+                 //           ThickDivider()
 
                             SettingsActionRow(
                                 title: "Restore Purchases",

@@ -102,8 +102,7 @@ struct StoredDocumentDetailView: View {
                     ForEach(analyses) { a in
                         NavigationLink {
                             StoredAnalysisDetailView(
-                                stored: a,
-                                documentText: document.documentText ?? ""
+                                stored: a
                             )
                         } label: {
                             analysisRow(a)

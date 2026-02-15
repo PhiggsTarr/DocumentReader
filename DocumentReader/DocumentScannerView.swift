@@ -1,13 +1,16 @@
 import SwiftUI
 import VisionKit
+import PDFKit
+import Foundation
 import UIKit
 
-struct DocumentScannerView: UIViewControllerRepresentable {
-    typealias UIViewControllerType = VNDocumentCameraViewController
 
-    var onComplete: ([UIImage]) -> Void
-    var onCancel: () -> Void
-    var onError: (Error) -> Void
+
+struct DocumentScannerView: UIViewControllerRepresentable {
+
+    let onComplete: ([UIImage]) -> Void
+    let onCancel: () -> Void
+    let onError: (Error) -> Void
 
     func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
         let vc = VNDocumentCameraViewController()
@@ -22,13 +25,16 @@ struct DocumentScannerView: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+
         let onComplete: ([UIImage]) -> Void
         let onCancel: () -> Void
         let onError: (Error) -> Void
 
-        init(onComplete: @escaping ([UIImage]) -> Void,
-             onCancel: @escaping () -> Void,
-             onError: @escaping (Error) -> Void) {
+        init(
+            onComplete: @escaping ([UIImage]) -> Void,
+            onCancel: @escaping () -> Void,
+            onError: @escaping (Error) -> Void
+        ) {
             self.onComplete = onComplete
             self.onCancel = onCancel
             self.onError = onError
@@ -39,17 +45,25 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             onCancel()
         }
 
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+        func documentCameraViewController(
+            _ controller: VNDocumentCameraViewController,
+            didFailWithError error: Error
+        ) {
             controller.dismiss(animated: true)
             onError(error)
         }
 
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+        func documentCameraViewController(
+            _ controller: VNDocumentCameraViewController,
+            didFinishWith scan: VNDocumentCameraScan
+        ) {
             var images: [UIImage] = []
             images.reserveCapacity(scan.pageCount)
+
             for i in 0..<scan.pageCount {
                 images.append(scan.imageOfPage(at: i))
             }
+
             controller.dismiss(animated: true)
             onComplete(images)
         }

@@ -8,158 +8,167 @@
 import Foundation
 import CoreData
 import CryptoKit
+import SwiftUI
+import VisionKit
+import UniformTypeIdentifiers
+
+// MARK: - Model
+
+struct ImportedDocument: Identifiable {
+    let id = UUID()
+    let displayName: String
+    let localURL: URL
+    let kind: Kind
+    
+    enum Kind {
+        case pdf
+        case image
+        case file
+    }
+}
+//
+//  DocumentStore.swift
+//  DocumentReader
+//
+//  Saves a StoredDocument (text/hash/file metadata) + a related StoredAnalysis (analysis JSON + export)
+//  so your Core Data model matches your screenshots.
+//
+//  Created by Gboinyee Tarr on 1/13/26.
+//
+
+import Foundation
+import CoreData
+import CryptoKit
 
 @MainActor
 final class DocumentStore: ObservableObject {
-    private let container: NSPersistentContainer
 
-    init(container: NSPersistentContainer = PersistenceController.shared.container) {
-        self.container = container
+    private var moc: NSManagedObjectContext {
+        PersistenceController.shared.container.viewContext
     }
 
-    // MARK: - Save (single analysis helper)
+    // MARK: - Public API
 
-    /// Saves an analysis result into Core Data under a StoredDocument.
-    @discardableResult
-    func saveAnalysis(
-        result: DocumentAnalyzeResponse,
-        for document: StoredDocument,
-        in context: NSManagedObjectContext
-    ) throws -> StoredAnalysis {
-
-        let a = StoredAnalysis(context: context)
-
-        a.createdAt = Date()
-        a.docType = result.docType
-        a.confidence = result.confidence ?? 0
-
-        // ✅ Store summary directly on StoredAnalysis (Option A)
-        a.summaryPlain = result.summaryPlain
-
-        // Link
-        a.document = document
-
-        try context.save()
-        return a
-    }
-
-    // MARK: - Exists
-
-    func existsDocument(withTextHash hash: String) throws -> StoredDocument? {
-        let request = StoredDocument.fetchRequest()
-        request.fetchLimit = 1
-        request.predicate = NSPredicate(format: "textHash == %@", hash)
-        return try container.viewContext.fetch(request).first
-    }
-
-    func sha256(_ input: String) -> String {
-        let data = Data(input.utf8)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
-    // MARK: - Save a new document + analysis
-
+    /// Save a document + its analysis.
+    /// - Important: This saves `documentText/textHash/fileURL/title` into **StoredDocument**
+    ///              and saves `analysisJSON/exportText/summary/etc` into **StoredAnalysis**
+    ///              then links: analysis.document = doc
     func saveDocument(
-        title: String?,
-        documentText: String?,
-        fileURL: URL?,
+        title: String,
+        documentText: String,
+        fileURL: URL?,                 // optional so nil works
         analysis: DocumentAnalyzeResponse,
         exportText: String
     ) throws {
-        let context = container.viewContext
+        let hash = sha256(documentText)
 
-        // Create document
-        let doc = StoredDocument(context: context)
+        // 1) If doc already exists, bail (prevents duplicates)
+        if let _ = try existsDocument(withTextHash: hash) {
+            return
+        }
+
+        // 2) Create the document (StoredDocument holds the text + hash)
+        let doc = StoredDocument(context: moc)
         doc.id = UUID()
-        doc.title = title
         doc.createdAt = Date()
         doc.lastOpenedAt = Date()
+        doc.title = title
+        doc.docType = analysis.docType ?? "Document"
         doc.documentText = documentText
-        doc.fileURL = fileURL?.path
-        doc.docType = analysis.docType
-        doc.textHash = sha256(documentText ?? "")
+        doc.textHash = hash
+        doc.fileURL = fileURL?.absoluteString   // <-- your model shows `fileURL` on StoredDocument (String)
 
-        // Create analysis
-        let stored = StoredAnalysis(context: context)
-        stored.id = UUID()
-        stored.createdAt = Date()
-        stored.exportText = exportText
-        stored.docType = analysis.docType
-        stored.confidence = analysis.confidence ?? 0
+        // 3) Create the analysis (StoredAnalysis holds analysis JSON + export)
+        let a = StoredAnalysis(context: moc)
+        a.id = UUID()
+        a.createdAt = Date()
+        a.title = title
+        a.docType = analysis.docType ?? "Document"
+        a.confidence = analysis.confidence ?? 0
+        a.summaryPlain = analysis.summaryPlain ?? ""
 
-        // ✅ FIX: this was missing, causing your summary to always be nil
-        stored.summaryPlain = analysis.summaryPlain
+        // Optional “who benefits most” fields shown in your model
+        a.whoBenefitsMostParty = analysis.whoBenefitsMost?.party ?? ""
+        a.whoBenefitsMostConfidence = analysis.whoBenefitsMost?.confidence ?? 0
 
-        if let wb = analysis.whoBenefitsMost {
-            stored.whoBenefitsMostParty = wb.party
-            stored.whoBenefitsMostConfidence = wb.confidence
-        }
+        a.exportText = exportText
 
-        stored.analysisJSON = try JSONEncoder().encode(analysis)
+        // Your StoredAnalysis model shows `fileURLString` (String)
+        a.fileURLString = fileURL?.absoluteString
 
-        // Link
-        stored.document = doc
+        // Encode the full response to Binary Data (analysisJSON)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        a.analysisJSON = try encoder.encode(analysis)
 
-        try context.save()
+        // 4) Link them (your inverse should populate doc.analyses if configured)
+        a.document = doc
+
+        try moc.save()
     }
 
-    // MARK: - Add a new analysis run to an existing document
+    /// Returns the existing StoredDocument (if any) for a document hash.
+    func existsDocument(withTextHash hash: String) throws -> StoredDocument? {
+        let req = StoredDocument.fetchRequest()
+        req.fetchLimit = 1
+        req.predicate = NSPredicate(format: "textHash == %@", hash)
 
-    func addAnalysis(
-        to document: StoredDocument,
-        analysis: DocumentAnalyzeResponse,
-        exportText: String
-    ) throws {
-        let context = container.viewContext
-
-        let stored = StoredAnalysis(context: context)
-        stored.id = UUID()
-        stored.createdAt = Date()
-        stored.exportText = exportText
-        stored.docType = analysis.docType
-        stored.confidence = analysis.confidence ?? 0
-
-        // ✅ Keep storing summary on every analysis row
-        stored.summaryPlain = analysis.summaryPlain
-
-        if let wb = analysis.whoBenefitsMost {
-            stored.whoBenefitsMostParty = wb.party
-            stored.whoBenefitsMostConfidence = wb.confidence
-        }
-
-        stored.analysisJSON = try JSONEncoder().encode(analysis)
-        stored.document = document
-
-        document.lastOpenedAt = Date()
-
-        try context.save()
+        let results = try moc.fetch(req)
+        return results.first
     }
 
-    // MARK: - Fetch recent documents
+    /// Decode the saved JSON from a StoredAnalysis back into `DocumentAnalyzeResponse`.
+    func decodeAnalysis(_ storedAnalysis: StoredAnalysis) -> DocumentAnalyzeResponse? {
+        guard let data = storedAnalysis.analysisJSON else { return nil }
+        return decodeDocumentAnalyzeResponse(from: data)
+    }
 
-    func fetchRecentDocuments(limit: Int = 50) throws -> [StoredDocument] {
-        let request = StoredDocument.fetchRequest()
-        request.sortDescriptors = [
-            NSSortDescriptor(keyPath: \StoredDocument.lastOpenedAt, ascending: false)
+    /// Convenience: get the "latest" analysis for a given StoredDocument and decode it.
+    func decodeLatestAnalysis(for document: StoredDocument) -> DocumentAnalyzeResponse? {
+        guard let analyses = document.analyses as? Set<StoredAnalysis>, !analyses.isEmpty else {
+            return nil
+        }
+        let latest = analyses.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }.first
+        guard let a = latest else { return nil }
+        return decodeAnalysis(a)
+    }
+
+    /// Fetch all saved documents (newest first).
+    func fetchSavedDocuments(limit: Int = 100) throws -> [StoredDocument] {
+        let req = StoredDocument.fetchRequest()
+        req.fetchLimit = limit
+        req.sortDescriptors = [
+            NSSortDescriptor(key: "createdAt", ascending: false)
         ]
-        request.fetchLimit = limit
-
-        return try container.viewContext.fetch(request) as? [StoredDocument] ?? []
+        return try moc.fetch(req)
     }
 
-    // MARK: - Decode a StoredAnalysis back into DocumentAnalyzeResponse
-
-    func decodeAnalysis(_ stored: StoredAnalysis) -> DocumentAnalyzeResponse? {
-        guard let data = stored.analysisJSON else { return nil }
-        return try? JSONDecoder().decode(DocumentAnalyzeResponse.self, from: data)
+    /// Fetch analyses for a document (newest first).
+    func fetchAnalyses(for document: StoredDocument, limit: Int = 50) throws -> [StoredAnalysis] {
+        let req = StoredAnalysis.fetchRequest()
+        req.fetchLimit = limit
+        req.sortDescriptors = [
+            NSSortDescriptor(key: "createdAt", ascending: false)
+        ]
+        req.predicate = NSPredicate(format: "document == %@", document)
+        return try moc.fetch(req)
     }
 
-    // MARK: - Delete a document (cascades to analyses)
+    // MARK: - Helpers
 
-    func deleteDocument(_ doc: StoredDocument) throws {
-        let context = container.viewContext
-        context.delete(doc)
-        try context.save()
+    private func decodeDocumentAnalyzeResponse(from data: Data) -> DocumentAnalyzeResponse? {
+        do {
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            return try decoder.decode(DocumentAnalyzeResponse.self, from: data)
+        } catch {
+            print("❌ decodeAnalysis failed:", error)
+            return nil
+        }
+    }
+
+    private func sha256(_ input: String) -> String {
+        let digest = SHA256.hash(data: Data(input.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
