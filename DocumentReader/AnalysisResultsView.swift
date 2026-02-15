@@ -12,9 +12,36 @@ struct AnalysisResultView: View {
     let documentText: String
     let canSave: Bool
 
-    @EnvironmentObject private var store: DocumentStore
     @State private var copiedToast: String?
 
+    // ✅ Track which parties have Rights expanded (use PartyBenefitsLiabilities.id)
+    // ✅ Track which individual Rights bullets are expanded (per party + right)
+    @State private var expandedRightIDs: Set<String> = []
+
+
+    @StateObject private var store = DocumentStore()
+
+    
+    private func rightKey(partyId: UUID, rightId: UUID) -> String {
+        "\(partyId.uuidString)|\(rightId.uuidString)"
+    }
+
+    private func isRightExpanded(partyId: UUID, rightId: UUID) -> Bool {
+        expandedRightIDs.contains(rightKey(partyId: partyId, rightId: rightId))
+    }
+
+    private func toggleRight(partyId: UUID, rightId: UUID) {
+        let key = rightKey(partyId: partyId, rightId: rightId)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if expandedRightIDs.contains(key) {
+                expandedRightIDs.remove(key)
+            } else {
+                expandedRightIDs.insert(key)
+            }
+        }
+    }
+
+    
     private var exportText: String {
         var parts: [String] = []
         parts.append("Document type: \(result.docType ?? "Unknown")")
@@ -85,6 +112,12 @@ struct AnalysisResultView: View {
                     parts.append("  Rights:")
                     for r in p.rights {
                         parts.append("  - \(r.right): \(r.details)")
+                        if !r.citations.isEmpty {
+                            parts.append("    Citations:")
+                            for c in r.citations {
+                                parts.append("    - \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
+                            }
+                        }
                     }
                 }
             }
@@ -110,13 +143,6 @@ struct AnalysisResultView: View {
         }
 
         return parts.joined(separator: "\n")
-    }
-    
-    private func toast(_ msg: String) {
-        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        withAnimation(.easeInOut(duration: 0.15)) {
-            copiedToast = msg
-        }
     }
 
     var body: some View {
@@ -192,20 +218,12 @@ struct AnalysisResultView: View {
                     if let parties = result.partyAnalysis, !parties.isEmpty {
                         Card("Benefits, liabilities, penalties & catches") {
                             VStack(alignment: .leading, spacing: 14) {
-                                ForEach(parties.indices, id: \.self) { index in
-                                    let p = parties[index]
+
+                                // ✅ No indices. Use Identifiable conformance.
+                                ForEach(parties) { p in
+                                 //   let isRightsExpanded = expandedRightIDs.contains(p.id)
 
                                     VStack(alignment: .leading, spacing: 10) {
-
-                                        // Add spacing before every item except the first
-                                        if index != 0 {
-                                         //   ThickDividerTwo()  // adjust this value to your desired spacing
-                                            Spacer()
-                                                .frame(height: 25)
-                                        } else{
-                                            Spacer()
-                                                .frame(height: 5)
-                                        }
                                         Text(p.roleTitle.isEmpty ? "Party" : p.roleTitle)
                                             .font(.headline)
                                             .fontWeight(.bold)
@@ -213,52 +231,87 @@ struct AnalysisResultView: View {
                                         Text(p.party.isEmpty ? "Unknown party" : p.party)
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
-                                      //  ThickDivider()
+
+                                        ThickDivider()
 
                                         if !p.benefits.isEmpty {
                                             sectionTitle("Benefits")
                                             bulletList(p.benefits)
-                                       //     ThickDivider()
+                                            ThickDivider()
                                         }
 
                                         if !p.liabilities.isEmpty {
                                             sectionTitle("Liabilities / obligations")
                                             bulletList(p.liabilities)
-                                        //    ThickDivider()
+                                            ThickDivider()
                                         }
 
                                         if !p.possiblePenalties.isEmpty {
                                             sectionTitle("Possible penalties / consequences")
                                             bulletList(p.possiblePenalties)
-                                         //   ThickDivider()
+                                            ThickDivider()
                                         }
 
                                         if !p.catches.isEmpty {
                                             sectionTitle("Catches / gotchas")
                                             bulletList(p.catches)
-                                           // ThickDivider()
+                                            ThickDivider()
                                         }
 
                                         if !p.rights.isEmpty {
                                             sectionTitle("Rights")
-                                            ForEach(p.rights) { r in
-                                                Text("• \(r.right): \(r.details)")
-                                                    .foregroundStyle(.secondary)
 
-                                                if !r.citations.isEmpty {
-                                                    ForEach(r.citations.indices, id: \.self) { i in
-                                                        let c = r.citations[i]
-                                                        Text("↳ \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
-                                                            .font(.footnote)
-                                                            .foregroundStyle(.secondary.opacity(0.85))
+                                            VStack(alignment: .leading, spacing: 10) {
+                                                ForEach(p.rights) { r in
+                                                    let expanded = isRightExpanded(partyId: p.id, rightId: r.id)
+
+                                                    VStack(alignment: .leading, spacing: 6) {
+
+                                                        // ✅ Tappable bullet row
+                                                        Button {
+                                                            toggleRight(partyId: p.id, rightId: r.id)
+                                                        } label: {
+                                                            HStack(alignment: .top, spacing: 10) {
+                                                                Text("• \(r.right): \(r.details)")
+                                                                    .foregroundStyle(.secondary)
+                                                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                                                // show chevron only if there are citations to expand
+                                                                if !r.citations.isEmpty {
+                                                                    Image(systemName: "chevron.right")
+                                                                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                                                                        .foregroundStyle(.secondary)
+                                                                        .padding(.top, 2)
+                                                                }
+                                                            }
+                                                            .contentShape(Rectangle())
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                        .disabled(r.citations.isEmpty) // if no citations, don’t “fake” expand
+
+                                                        // ✅ Citations only when expanded
+                                                        if expanded, !r.citations.isEmpty {
+                                                            VStack(alignment: .leading, spacing: 4) {
+                                                                ForEach(r.citations) { c in
+                                                                    Text("↳ \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
+                                                                        .font(.footnote)
+                                                                        .foregroundStyle(.secondary.opacity(0.85))
+                                                                }
+                                                            }
+                                                            .padding(.leading, 18)
+                                                            .transition(.opacity.combined(with: .move(edge: .top)))
+                                                        }
                                                     }
+
+                                                    Divider().opacity(0.18)
                                                 }
                                             }
-                                            if index != 0 {
-                                             //   ThickDividerTwo()
-                                            }
+
+                                            ThickDivider()
                                         }
+
                                     }
+                                    .padding(.vertical, 6)
                                 }
                             }
                         }
@@ -295,20 +348,6 @@ struct AnalysisResultView: View {
                             if let u = result.urgency?.level {
                                 row("Urgency", u)
                             }
-                        }
-                    }
-
-
-                    if let paras = result.analysisParagraphs, !paras.isEmpty {
-                        Card("Detailed analysis") {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(paras.indices, id: \.self) { i in
-                                    Text(paras[i])
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    if i != paras.count - 1 { Divider().opacity(0.25) }
-                                }
-                            }
-                            .foregroundStyle(.secondary)
                         }
                     }
 
@@ -359,13 +398,7 @@ struct AnalysisResultView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    SaveAnalysisCard(
-                        canSave: canSave,
-                        title: result.docType ?? "Document",
-                        documentText: documentText,
-                        analysis: result,
-                        exportText: exportText
-                    )
+                    SaveAnalysisCard(canSave: canSave, result: result, documentText: documentText, exportText: exportText)
 
                     if let lim = result.limitations, !lim.isEmpty {
                         Card("Limitations") {
@@ -402,50 +435,90 @@ struct AnalysisResultView: View {
             }
         }
     }
-    
+
+    // ✅ Tappable header row with chevron
+    private func expandableSectionHeader(
+        title: String,
+        isExpanded: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+            .padding(.top, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func sectionTitle(_ text: String) -> some View {
-          Text(text)
-              .font(.headline)
-              .fontWeight(.bold)
-              .foregroundStyle(.primary)
-              .padding(.top, 4)
-      }
+        Text(text)
+            .font(.headline)
+            .fontWeight(.bold)
+            .foregroundStyle(.primary)
+            .padding(.top, 4)
+    }
 
-      private func bulletList(_ items: [String]) -> some View {
-          VStack(alignment: .leading, spacing: 6) {
-              ForEach(items, id: \.self) { s in
-                  Text("• \(s)")
-                      .foregroundStyle(.secondary)
-              }
-          }
-      }
+    private func bulletList(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { s in
+                Text("• \(s)")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 
-      private func row(_ k: String, _ v: String) -> some View {
-          HStack {
-              Text(k)
-                  .foregroundStyle(.secondary)
-              Spacer()
-              Text(v)
-                  .fontWeight(.semibold)
-          }
-          .font(.subheadline)
-      }
+    private func row(_ k: String, _ v: String) -> some View {
+        HStack {
+            Text(k).foregroundStyle(.secondary)
+            Spacer()
+            Text(v).fontWeight(.semibold)
+        }
+        .font(.subheadline)
+    }
 }
 
-// MARK: - Save Card
+
+struct ThickDivider: View {
+    var body: some View {
+        Rectangle()
+            .frame(height: 2)
+            .foregroundColor(.white.opacity(0.25))
+            .padding(.vertical, 4)
+    }
+}
+
+struct ThickDividerTwo: View {
+    var body: some View {
+        Rectangle()
+            .frame(height: 16)
+            .foregroundColor(.white.opacity(0.25))
+            .padding(.vertical, 4)
+    }
+}
 
 struct SaveAnalysisCard: View {
     let canSave: Bool
-    let title: String
+    let result: DocumentAnalyzeResponse
     let documentText: String
-    let analysis: DocumentAnalyzeResponse
     let exportText: String
-
-    @EnvironmentObject private var store: DocumentStore
 
     @State private var isSaving = false
     @State private var isSaved = false
     @State private var toast: String?
+
+    // Prefer injecting the store (see notes below). This is OK if DocumentStore is lightweight.
+    @StateObject private var store = DocumentStore()
 
     var body: some View {
         Group {
@@ -485,7 +558,12 @@ struct SaveAnalysisCard: View {
             }
         }
     }
-
+    func sha256(_ input: String) -> String {
+        let data = Data(input.utf8)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
     private func save() {
         guard !isSaving && !isSaved else {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -496,47 +574,36 @@ struct SaveAnalysisCard: View {
         isSaving = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
-        Task {
-            do {
-                let hash = sha256(documentText)
-                if let _ = try store.existsDocument(withTextHash: hash) {
-                    isSaved = true
-                    isSaving = false
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    toast = "Already saved"
-                    return
-                }
+        do {
+            let hash = sha256(documentText)
 
-                try store.saveDocument(
-                    title: title,
-                    documentText: documentText,
-                    fileURL: nil,
-                    analysis: analysis,
-                    exportText: exportText
-                )
-
+            if let _ = try store.existsDocument(withTextHash: hash) {
                 isSaved = true
                 isSaving = false
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
-                toast = "Saved"
-            } catch {
-                isSaving = false
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
-                toast = "Save failed: \(error.localizedDescription)"
+                toast = "Already saved"
+                return
             }
+
+            try store.saveDocument(
+                title: result.docType ?? "Document",
+                documentText: documentText,
+                fileURL: nil,
+                analysis: result,
+                exportText: exportText
+            )
+
+            isSaved = true
+            isSaving = false
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            toast = "Saved"
+        } catch {
+            isSaving = false
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            toast = "Save failed: \(error.localizedDescription)"
         }
     }
-
-
-    private func sha256(_ input: String) -> String {
-        let digest = SHA256.hash(data: Data(input.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-    
-
-  }
-
-    
+}
 
 
 
@@ -555,7 +622,3 @@ extension View {
         }
     }
 }
-
-
-//struct ThickDivider: View { var body: some View { Rectangle() .frame(height: 2) .foregroundColor(.white.opacity(0.25)) .padding(.vertical, 4) } }
-//struct ThickDividerTwo: View { var body: some View { Rectangle() .frame(height: 8) .foregroundColor(.white.opacity(0.25)) .padding(.vertical, 4) } }

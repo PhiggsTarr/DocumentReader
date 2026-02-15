@@ -5,14 +5,6 @@
 //  Created by Gboinyee Tarr on 1/18/26.
 //
 
-
-//
-//  Entitlements.swift
-//  DocumentReader
-//
-//  Created by Gboinyee Tarr on 1/18/26.
-//
-
 import Foundation
 import SwiftUI
 

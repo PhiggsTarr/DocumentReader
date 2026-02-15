@@ -16,28 +16,53 @@ final class PurchaseManager: ObservableObject {
     // Pro: subscription that enables unlimited scans
     let proProductId = "com.nerdinventions.smartfriendlegaltranslator.monthly_scans"
 
-    // Scan packs: should be CONSUMABLE products in App Store Connect
+    // Scan packs (CONSUMABLE)
     let scanPack5ProductId  = "com.NerdInventions.SmartFriendLegalTranslator.5IndividualScans"
     let scanPack10ProductId = "com.NerdInventions.SmartFriendLegalTranslator.IndividualScan"
+    
+    private var didInitialEntitlementsRefresh = false
 
-    // MARK: - Published state
 
-    @Published private(set) var isPro: Bool = false
-    @Published private(set) var freeScansRemaining: Int = 0
+    // MARK: - UI/Product loading state
 
-    // Use this to display both errors + friendly info messages in UI
+    enum ProductsState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var productsState: ProductsState = .idle
+
+    /// Use this to display error messages in UI
     @Published var lastErrorMessage: String? = nil
+
+    /// Optional: non-error, user-facing status (e.g. cancelled)
+    @Published var lastInfoMessage: String? = nil
 
     // ✅ Track which product is being purchased (so only one button shows loading)
     @Published private(set) var purchasingProductId: String? = nil
 
-    // Optional: to show prices
+    // MARK: - Published entitlements
+
+    @Published private(set) var isPro: Bool = false
+    @Published private(set) var freeScansRemaining: Int = 0
+
+    // MARK: - Products (for prices)
+
     @Published private(set) var proProduct: Product? = nil
     @Published private(set) var scanPack5Product: Product? = nil
     @Published private(set) var scanPack10Product: Product? = nil
 
+    // MARK: - Persistence
+
     private let defaults = UserDefaults.standard
     private let scansKey = "scan.remaining.v3"
+
+    // ✅ Prevent double-granting consumables across purchase() + Transaction.updates
+    private let processedTxKey = "processed.tx.ids.v1"
+
+    // MARK: - Transaction updates task
 
     private var transactionUpdatesTask: Task<Void, Never>? = nil
 
@@ -53,16 +78,29 @@ final class PurchaseManager: ObservableObject {
             guard let self else { return }
             for await update in Transaction.updates {
                 if case .verified(let transaction) = update {
-                    await self.handleVerifiedTransaction(transaction)
+                    await self.processVerifiedTransaction(transaction)
                     await transaction.finish()
+                    await self.refreshEntitlements()
                 }
             }
+        }
+
+        // Proactively load products so buttons show prices quickly
+        Task {
+            await refreshEntitlements()
         }
     }
 
     deinit {
         transactionUpdatesTask?.cancel()
     }
+    
+    func refreshEntitlementsIfNeeded() async {
+        guard !didInitialEntitlementsRefresh else { return }
+        didInitialEntitlementsRefresh = true
+        await refreshEntitlements()
+    }
+
 
     // MARK: - UI helpers
 
@@ -75,6 +113,15 @@ final class PurchaseManager: ObservableObject {
     var isPurchasingPro: Bool { purchasingProductId == proProductId }
     var isPurchasingPack5: Bool { purchasingProductId == scanPack5ProductId }
     var isPurchasingPack10: Bool { purchasingProductId == scanPack10ProductId }
+
+    var canAttemptPurchases: Bool {
+        switch productsState {
+        case .loaded:
+            return true
+        default:
+            return false
+        }
+    }
 
     // MARK: - Scan gating
 
@@ -110,28 +157,64 @@ final class PurchaseManager: ObservableObject {
         return false
     }
 
+    // MARK: - Public: retry product loading (for “Couldn’t load purchases. Retry.”)
+
+    func retryLoadPurchases() async {
+        await loadProducts(force: true)
+    }
+
     // MARK: - Entitlements + product loading
 
     func refreshEntitlements() async {
-        await loadProducts()
+        await loadProducts(force: false)
 
+        // ✅ compute off the main actor to avoid UI hangs during transitions
+        let proActive = await PurchaseManager.fetchProActiveEntitlement(proProductId: proProductId)
+
+        // Back on MainActor (we're already @MainActor), safe to assign published state
+        isPro = proActive
+    }
+
+    /// Runs off-main (static + no @MainActor isolation), avoids blocking UI
+    private static func fetchProActiveEntitlement(proProductId: String) async -> Bool {
         var proActive = false
 
         for await result in Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else { continue }
 
-            if transaction.productID == proProductId {
-                // Extra safety: revoked subscriptions shouldn't count
-                if transaction.revocationDate == nil {
-                    proActive = true
-                }
+            if transaction.productID == proProductId, transaction.revocationDate == nil {
+                proActive = true
+                break
             }
         }
-
-        isPro = proActive
+        return proActive
     }
 
-    private func loadProducts() async {
+
+    func ensureProductsLoaded() async -> Bool {
+        switch productsState {
+        case .loaded:
+            return true
+        case .loading:
+            // Wait briefly and let the UI keep showing loading.
+            // (No blocking loop; just attempt a reload if needed.)
+            return (proProduct != nil) || (scanPack5Product != nil) || (scanPack10Product != nil)
+        case .failed:
+            return false
+        case .idle:
+            await loadProducts(force: false)
+            return productsState == .loaded
+        }
+    }
+
+    private func loadProducts(force: Bool) async {
+        if !force, case .loaded = productsState { return }
+        if case .loading = productsState { return }
+
+        productsState = .loading
+        lastErrorMessage = nil
+        lastInfoMessage = nil
+
         do {
             let ids = [proProductId, scanPack5ProductId, scanPack10ProductId]
             let products = try await Product.products(for: ids)
@@ -139,34 +222,51 @@ final class PurchaseManager: ObservableObject {
             self.proProduct = products.first(where: { $0.id == proProductId })
             self.scanPack5Product = products.first(where: { $0.id == scanPack5ProductId })
             self.scanPack10Product = products.first(where: { $0.id == scanPack10ProductId })
+
+            // If Apple returns 0 products (bad IDs / account / StoreKit issue), treat as failure so UI shows Retry.
+            if proProduct == nil && scanPack5Product == nil && scanPack10Product == nil {
+                productsState = .failed("Couldn’t load purchases. Retry.")
+            } else {
+                productsState = .loaded
+            }
         } catch {
-            print("⚠️ Failed to load products:", error.localizedDescription)
+            let message = friendlyStoreKitMessage(from: error)
+            productsState = .failed(message.isEmpty ? "Couldn’t load purchases. Retry." : message)
         }
     }
 
     // MARK: - Purchases
 
     func purchasePro() async {
-        await purchase(productId: proProductId, grantScans: nil)
+        await purchase(productId: proProductId)
     }
 
     func purchaseScanPack5() async {
         if shouldBlockScanPackPurchase() { return }
-        await purchase(productId: scanPack5ProductId, grantScans: 5)
+        await purchase(productId: scanPack5ProductId)
     }
 
     func purchaseScanPack10() async {
         if shouldBlockScanPackPurchase() { return }
-        await purchase(productId: scanPack10ProductId, grantScans: 10)
+        await purchase(productId: scanPack10ProductId)
     }
 
-    private func purchase(productId: String, grantScans: Int?) async {
-        // ✅ Prevent overlapping purchases without disabling UI
+    private func purchase(productId: String) async {
+        // ✅ Prevent overlapping purchases (prevents double-taps)
         guard purchasingProductId == nil else { return }
 
         lastErrorMessage = nil
+        lastInfoMessage = nil
+
+        // ✅ If products aren’t loaded, don’t allow “tap did nothing”
+        let ready = await ensureProductsLoaded()
+        guard ready else {
+            lastErrorMessage = "Couldn’t load purchases. Retry."
+            return
+        }
+
         purchasingProductId = productId
-        defer { purchasingProductId = nil }
+        defer { purchasingProductId = nil } // ✅ guarantees spinner stops (cancel/error/success)
 
         do {
             let products = try await Product.products(for: [productId])
@@ -181,10 +281,9 @@ final class PurchaseManager: ObservableObject {
             case .success(let verification):
                 switch verification {
                 case .verified(let transaction):
-                    if let n = grantScans {
-                        addScans(n)
-                    }
-
+                    // ✅ Single source of truth: never grant here directly.
+                    // processVerifiedTransaction handles Pro + consumables, idempotently.
+                    await processVerifiedTransaction(transaction)
                     await transaction.finish()
                     await refreshEntitlements()
 
@@ -193,7 +292,7 @@ final class PurchaseManager: ObservableObject {
                 }
 
             case .userCancelled:
-                break
+                lastInfoMessage = "Purchase cancelled."
 
             case .pending:
                 lastErrorMessage = "Purchase is pending approval."
@@ -201,36 +300,64 @@ final class PurchaseManager: ObservableObject {
             @unknown default:
                 lastErrorMessage = "Unknown purchase state."
             }
-
         } catch {
-            lastErrorMessage = error.localizedDescription
+            // ✅ Airplane mode / no internet / StoreKit auth issues become friendly + recoverable
+            lastErrorMessage = friendlyStoreKitMessage(from: error)
         }
     }
 
-    private func handleVerifiedTransaction(_ transaction: Transaction) async {
+    // MARK: - Transaction processing (idempotent)
+
+    private func loadProcessedTxIDs() -> Set<UInt64> {
+        let arr = defaults.array(forKey: processedTxKey) as? [NSNumber] ?? []
+        return Set(arr.map { $0.uint64Value })
+    }
+
+    private func saveProcessedTxIDs(_ set: Set<UInt64>) {
+        defaults.set(set.map { NSNumber(value: $0) }, forKey: processedTxKey)
+    }
+
+    /// Returns true if this transaction was not processed before (i.e., safe to grant)
+    private func markTransactionProcessed(_ id: UInt64) -> Bool {
+        var set = loadProcessedTxIDs()
+        if set.contains(id) { return false }
+        set.insert(id)
+        saveProcessedTxIDs(set)
+        return true
+    }
+
+    /// Centralized transaction handler used by BOTH purchase() and Transaction.updates
+    private func processVerifiedTransaction(_ transaction: Transaction) async {
+        // Subscription: just refresh entitlements
         if transaction.productID == proProductId {
             await refreshEntitlements()
             return
         }
 
-        if transaction.productID == scanPack5ProductId {
-            addScans(5)
+        // Consumables: grant exactly once per transaction.id
+        guard markTransactionProcessed(transaction.id) else {
+            // Already granted; do nothing
             return
         }
 
-        if transaction.productID == scanPack10ProductId {
+        if transaction.productID == scanPack5ProductId {
+            addScans(5)
+        } else if transaction.productID == scanPack10ProductId {
             addScans(10)
-            return
         }
     }
 
+    // MARK: - Restore
+
     func restorePurchases() async {
         lastErrorMessage = nil
+        lastInfoMessage = nil
         do {
             try await AppStore.sync()
             await refreshEntitlements()
+            lastInfoMessage = "Purchases restored."
         } catch {
-            lastErrorMessage = error.localizedDescription
+            lastErrorMessage = friendlyStoreKitMessage(from: error)
         }
     }
 
@@ -239,5 +366,45 @@ final class PurchaseManager: ObservableObject {
     func openManageSubscriptions() {
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         UIApplication.shared.open(url)
+    }
+
+    // MARK: - Error mapping
+
+    private func friendlyStoreKitMessage(from error: Error) -> String {
+        // Common network failures (Airplane Mode, no service, etc.)
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "No internet connection. Please check your network (Wi-Fi/Cellular) and try again."
+            default:
+                break
+            }
+        }
+
+        let nsError = error as NSError
+
+        // StoreKit / App Store authentication issues
+        if nsError.domain == SKErrorDomain {
+            // Some auth failures show up as 509
+            if nsError.code == 509 {
+                return "No App Store account found. Please sign into the App Store (Settings → App Store) and try again."
+            }
+
+            if nsError.code == SKError.Code.cloudServicePermissionDenied.rawValue {
+                return "No internet connection. Please check your network (Wi-Fi/Cellular) and try again."
+            }
+
+            switch nsError.code {
+            case SKError.paymentNotAllowed.rawValue:
+                return "In-App Purchases are disabled on this device."
+            case SKError.storeProductNotAvailable.rawValue:
+                return "This purchase is not available in your region."
+            default:
+                break
+            }
+        }
+
+        // Fallback
+        return error.localizedDescription
     }
 }

@@ -30,12 +30,8 @@ struct StoredDocumentDetailView: View {
         .navigationTitle("Document")
         .navigationBarTitleDisplayMode(.inline)
         .polishedNavBar()
-        .task(id: document.objectID) {
-            reloadAnalyses()
-        }
-        .onAppear {
-            reloadAnalyses()
-        }
+        .task(id: document.objectID) { reloadAnalyses() }
+        .onAppear { reloadAnalyses() }
     }
 
     private func reloadAnalyses() {
@@ -62,8 +58,9 @@ struct StoredDocumentDetailView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        let summary = (a.summaryPlain ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        Text(summary.isEmpty ? "No summary saved for this analysis." : summary)
+                        // ✅ FIX: treat blank saved summary as missing
+                        let summary = (a.summaryPlain).nilIfBlank ?? "No summary saved for this analysis."
+                        Text(summary)
                             .foregroundStyle(.secondary)
                             .lineLimit(10)
 
@@ -73,9 +70,7 @@ struct StoredDocumentDetailView: View {
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
-
                             Spacer()
-
                             if a.confidence > 0 {
                                 Text("Confidence: \(Int(a.confidence * 100))%")
                                     .font(.footnote)
@@ -102,12 +97,12 @@ struct StoredDocumentDetailView: View {
                     ForEach(analyses) { a in
                         NavigationLink {
                             StoredAnalysisDetailView(
-                                stored: a
+                                stored: a,
+                                documentText: document.documentText ?? ""
                             )
                         } label: {
                             analysisRow(a)
                         }
-
                         Divider().opacity(0.25)
                     }
                 }

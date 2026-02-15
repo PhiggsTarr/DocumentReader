@@ -26,7 +26,7 @@ private struct PaywallPurchaseRow: View {
                     .foregroundStyle(.tint)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(isLoading ? "Purchasing…" : title)
+                    Text(isLoading ? "Loading…" : title)
                         .fontWeight(.semibold)
                         .foregroundStyle(.tint)
 
@@ -85,6 +85,21 @@ struct PaywallView: View {
     @EnvironmentObject private var purchaseManager: PurchaseManager
     @Environment(\.dismiss) private var dismiss
 
+    private var isProductsLoading: Bool {
+        if case .loading = purchaseManager.productsState { return true }
+        if case .idle = purchaseManager.productsState { return true } // treat idle like loading for UI
+        return false
+    }
+
+    private var productsFailedMessage: String? {
+        if case .failed(let msg) = purchaseManager.productsState { return msg }
+        return nil
+    }
+
+    private var purchasesReady: Bool {
+        purchaseManager.canAttemptPurchases
+    }
+
     var body: some View {
         ZStack {
             ScreenBackground()
@@ -118,29 +133,62 @@ struct PaywallView: View {
                         }
                     }
 
+                    // ✅ Product loading / failure state surfaced clearly (prevents “tap did nothing”)
+                    if let msg = productsFailedMessage {
+                        Card("Purchases", icon: "exclamationmark.triangle.fill", tint: .yellow) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(msg.isEmpty ? "Couldn’t load purchases. Retry." : msg)
+                                    .foregroundStyle(.secondary)
+
+                                Button {
+                                    Task { await purchaseManager.retryLoadPurchases() }
+                                } label: {
+                                    Text("Retry")
+                                        .font(.footnote.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+                    } else if isProductsLoading {
+                        Card("Purchases", icon: "arrow.triangle.2.circlepath", tint: .mint) {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("Loading purchase options…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
                     Card("Scan Packs", icon: "plus.circle.fill", tint: .mint) {
                         VStack(spacing: 10) {
 
+                            // Pro / Unlimited
                             PaywallPurchaseRow(
                                 title: purchaseManager.isPro ? "Pro Active" : "Unlimited Monthly Scans",
-                                subtitle: purchaseManager.isPro ? "You already have unlimited scans" : "Best for frequent users",
+                                subtitle: purchaseManager.isPro
+                                    ? "You already have unlimited scans"
+                                    : "Best for frequent users",
                                 leadingSystemImage: "crown.fill",
-                                trailingText: purchaseManager.proProduct?.displayPrice,
+                                trailingText: purchasesReady ? purchaseManager.proProduct?.displayPrice : "Loading…",
                                 isProminent: true,
-                                isLoading: purchaseManager.isPurchasingPro,
-                                isBlocked: purchaseManager.isPurchasingAny || purchaseManager.isPro
+                                // ✅ show spinner while purchasing OR while products are loading
+                                isLoading: purchaseManager.isPurchasingPro || isProductsLoading,
+                                // ✅ block tapping until products are loaded + while another purchase is running + if Pro already active
+                                isBlocked: purchaseManager.isPurchasingAny || !purchasesReady || purchaseManager.isPro
                             ) {
                                 Task { await purchaseManager.purchasePro() }
                             }
 
+                            // 10 scans
                             PaywallPurchaseRow(
                                 title: "Buy 10 scans",
                                 subtitle: "Most popular • Great value",
                                 leadingSystemImage: "plus.circle.fill",
-                                trailingText: purchaseManager.scanPack10Product?.displayPrice,
+                                trailingText: purchasesReady ? purchaseManager.scanPack10Product?.displayPrice : "Loading…",
                                 isProminent: false,
-                                isLoading: purchaseManager.isPurchasingPack10,
-                                isBlocked: purchaseManager.isPurchasingAny
+                                isLoading: purchaseManager.isPurchasingPack10 || isProductsLoading,
+                                isBlocked: purchaseManager.isPurchasingAny || !purchasesReady
                             ) {
                                 if purchaseManager.isPro {
                                     purchaseManager.showAlreadyUnlimitedMessage()
@@ -149,14 +197,15 @@ struct PaywallView: View {
                                 }
                             }
 
+                            // 5 scans
                             PaywallPurchaseRow(
                                 title: "Buy 5 scans",
                                 subtitle: "Just need a few",
                                 leadingSystemImage: "plus.circle.fill",
-                                trailingText: purchaseManager.scanPack5Product?.displayPrice,
+                                trailingText: purchasesReady ? purchaseManager.scanPack5Product?.displayPrice : "Loading…",
                                 isProminent: false,
-                                isLoading: purchaseManager.isPurchasingPack5,
-                                isBlocked: purchaseManager.isPurchasingAny
+                                isLoading: purchaseManager.isPurchasingPack5 || isProductsLoading,
+                                isBlocked: purchaseManager.isPurchasingAny || !purchasesReady
                             ) {
                                 if purchaseManager.isPro {
                                     purchaseManager.showAlreadyUnlimitedMessage()
@@ -165,7 +214,7 @@ struct PaywallView: View {
                                 }
                             }
 
-                            Divider().opacity(0.25)
+                            ThickDividerTwo()
 
                             PaywallPurchaseRow(
                                 title: "Restore Purchases",
@@ -174,7 +223,7 @@ struct PaywallView: View {
                                 trailingText: nil,
                                 isProminent: false,
                                 isLoading: false,
-                                isBlocked: purchaseManager.isPurchasingAny
+                                isBlocked: purchaseManager.isPurchasingAny || !purchasesReady
                             ) {
                                 Task { await purchaseManager.restorePurchases() }
                             }
@@ -193,6 +242,14 @@ struct PaywallView: View {
                         }
                     }
 
+                    // ✅ Show friendly info (e.g. “Purchase cancelled.”) separately from errors
+                    if let info = purchaseManager.lastInfoMessage, !info.isEmpty {
+                        Card("Status", icon: "info.circle.fill", tint: .mint) {
+                            Text(info)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     if let err = purchaseManager.lastErrorMessage, !err.isEmpty {
                         Card("Purchase", icon: "info.circle.fill", tint: .mint) {
                             Text(err)
@@ -208,6 +265,7 @@ struct PaywallView: View {
 
                             HStack(spacing: 12) {
                                 NavigationLink("Terms") {
+                                    // This view is informational in Paywall. Your “gate” should be handled by TermsGateModifier.
                                     TermsAndConditionsView { }
                                 }
                                 .font(.footnote.weight(.semibold))
@@ -241,6 +299,9 @@ struct PaywallView: View {
         .navigationTitle("Upgrade")
         .navigationBarTitleDisplayMode(.inline)
         .polishedNavBar()
-        .task { await purchaseManager.refreshEntitlements() }
+        .task {
+            await Task.yield()
+            await purchaseManager.refreshEntitlementsIfNeeded()
+        }
     }
 }

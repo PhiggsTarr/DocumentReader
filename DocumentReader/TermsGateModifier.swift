@@ -9,21 +9,31 @@ private enum TermsStorage {
     static let acceptedKey = "terms.accepted.v1"
 }
 
+/// Gate that forces the Terms screen to be accepted once per install (or until user defaults cleared).
 struct TermsGateModifier: ViewModifier {
-    @State private var accepted: Bool = UserDefaults.standard.bool(forKey: TermsStorage.acceptedKey)
 
-    private var shouldShowGate: Bool { !accepted }
+    // ✅ Persisted state
+    @AppStorage(TermsStorage.acceptedKey) private var accepted: Bool = false
+
+    // ✅ Real presentation state (SwiftUI can dismiss normally)
+    @State private var showTerms: Bool = false
 
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(isPresented: Binding(
-                get: { shouldShowGate },
-                set: { _ in } // no-op; acceptance drives dismissal
-            )) {
-                TermsAndConditionsView {
+            .onAppear {
+                // Present only if not accepted
+                showTerms = !accepted
+            }
+            .onChange(of: accepted) { _, newValue in
+                // If accepted flips true, dismiss the cover
+                if newValue { showTerms = false }
+            }
+            .fullScreenCover(isPresented: $showTerms) {
+                TermsAndConditionsView(onAccept: {
+                    // ✅ Set acceptance FIRST so the cover won’t re-appear during dismissal
                     accepted = true
-                    UserDefaults.standard.set(true, forKey: TermsStorage.acceptedKey)
-                }
+                    showTerms = false
+                })
             }
     }
 }

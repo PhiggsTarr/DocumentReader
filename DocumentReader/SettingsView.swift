@@ -115,7 +115,7 @@ struct SettingsView: View {
 
                             // ✅ Pro (Monthly)
                             SettingsActionRow(
-                                title: purchaseManager.isPro ? "Pro Active" : "Unlimited Monthly Scans",
+                                title: purchaseManager.isPro ? "Pro Active" : "Unlock Pro",
                                 subtitle: purchaseManager.isPro ? "You already have unlimited scans" : "Best for frequent users",
                                 leadingSystemImage: "crown.fill",
                                 trailingText: purchaseManager.proProduct?.displayPrice,
@@ -160,7 +160,7 @@ struct SettingsView: View {
                                 }
                             }
 
-                 //           ThickDivider()
+                            ThickDividerTwo()
 
                             SettingsActionRow(
                                 title: "Restore Purchases",
@@ -194,6 +194,8 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    
+                    
 
                     Card("Legal", icon: "shield.lefthalf.filled", tint: .mint) {
                         VStack(spacing: 10) {
@@ -223,7 +225,11 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .polishedNavBar()
-        .task { await purchaseManager.refreshEntitlements() }
+        .task {
+            await purchaseManager.ensureProductsLoaded()
+            await purchaseManager.refreshEntitlements()
+        }
+
     }
 
     private func row(_ title: String, icon: String) -> some View {

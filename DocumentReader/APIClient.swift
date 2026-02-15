@@ -10,8 +10,11 @@ final class APIClient {
     private let session: URLSession
     private let baseURL: URL
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60   // time to first byte
+        config.timeoutIntervalForResource = 120 // entire transfer
+        self.session = URLSession(configuration: config)
 
         let baseString = AppConfig.apiBaseURL
 
@@ -47,10 +50,11 @@ final class APIClient {
     }
 
     private struct ChatRequest: Codable {
-        let document_text: String
+        let document_text: String?    // optional now
         let detail_level: String?
         let messages: [ChatWireMessage]
     }
+
 
     struct ChatResponse: Codable, Equatable {
         let reply: String
