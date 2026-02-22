@@ -1,3 +1,10 @@
+//
+//  ChatView.swift
+//  DocumentReader
+//
+//  Created by Gboinyee Tarr
+//
+
 import SwiftUI
 import UIKit
 
@@ -137,7 +144,15 @@ Rules:
 
             messages.append(.init(
                 role: "assistant",
-                content: "Ask me questions about this document. If you want, ask: “Draft a PDF response letter about this document.” (Not legal advice.)"
+                content: """
+Hi! I'm your Smart Friend! 😊👋
+
+Ask me anything about this document!
+
+If you want, try asking: “Draft a PDF response letter about this document.”
+
+(Not legal advice.)
+"""
             ))
         }
     }
@@ -193,11 +208,6 @@ Rules:
                 Text("Document Discussion")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-
-//                Text(documentText)
-//                    .font(.footnote)
-//                    .foregroundStyle(.secondary)
-//                    .lineLimit(2)
             }
         }
         .padding(.horizontal, DS.pagePadding)
@@ -400,27 +410,48 @@ Rules:
                 .filter { !$0.isThinking }
                 .map { APIClient.ChatWireMessage(role: $0.role, content: $0.content) }
 
-            var resp = try await api.chatAboutDocument(documentText: documentText, messages: wire)
+            let resp = try await api.chatAboutDocument(documentText: documentText, messages: wire)
 
-            if let draft = resp.pdfDraft, isBadPDFDraft(draft, userRequest: trimmed) {
-                let retryWire = wire + [
-                    .init(role: "user", content: """
-Draft the actual letter now as a PDF-ready draft.
-- Do NOT ask clarifying questions.
-- Do NOT restate the request.
-- Include the full letter with a polite tone and placeholders if needed.
-""")
-                ]
-                resp = try await api.chatAboutDocument(documentText: documentText, messages: retryWire)
-            }
+            // ✅ Source of truth:
+            let allowed = resp.pdfAllowed ?? false
+            let draft = resp.pdfDraft
 
             var assistantReply = resp.reply
 
-            if let draft = resp.pdfDraft {
-                _ = try persistNewPDFVersion(from: draft, assistantReply: resp.reply)
+            // ✅ If server says "allowed", we MUST have a draft; otherwise show debuggable info.
+            if allowed {
+                guard let draft else {
+                    assistantReply = """
+    ❌ Server said PDF is allowed, but no pdf_draft was returned.
 
-                // ✅ FIX: if the PDF was created, always show success in the chat.
-                assistantReply = "✅ PDF created. Use **PDF Draft Ready** above to share/export. (Not legal advice.) Please let me know if there are any errors and I'll happily re-draft your PDF!"
+    Build: \(resp.buildId ?? "(missing)")
+    OpenAI error: \(resp.openaiError ?? "(none)")
+    Limitations: \(resp.limitations?.joined(separator: " • ") ?? "(none)")
+    """
+                    if let idx = messages.firstIndex(where: { $0.id == thinkingId }) {
+                        messages[idx] = .init(role: "assistant", content: assistantReply)
+                    } else {
+                        messages.append(.init(role: "assistant", content: assistantReply))
+                    }
+                    isSending = false
+                    return
+                }
+
+                // ✅ Create + save the PDF locally
+                do {
+                    _ = try persistNewPDFVersion(from: draft, assistantReply: resp.reply)
+
+                    assistantReply = """
+    ✅ PDF created. Use **PDF Draft Ready** above to share/export. (Not legal advice.)
+    """
+                } catch {
+                    assistantReply = """
+    ❌ Server returned a pdf_draft, but the app failed to render/save the PDF.
+
+    Build: \(resp.buildId ?? "(missing)")
+    Error: \(error.localizedDescription)
+    """
+                }
             }
 
             if let idx = messages.firstIndex(where: { $0.id == thinkingId }) {
@@ -438,7 +469,6 @@ Draft the actual letter now as a PDF-ready draft.
 
         isSending = false
     }
-
     // MARK: - Improve PDF
 
     @MainActor
@@ -457,21 +487,39 @@ Draft the actual letter now as a PDF-ready draft.
                 .map { APIClient.ChatWireMessage(role: $0.role, content: $0.content) }
 
             let revisionPrompt = """
-Revise the last drafted letter with these instructions:
-\(style)
+    Revise the last drafted letter with these instructions:
+    \(style)
 
-Return an updated pdfDraft with the full revised letter.
-Do NOT ask clarifying questions.
-Do NOT restate the user’s request.
-"""
+    Return an updated pdfDraft with the full revised letter.
+    Do NOT ask clarifying questions.
+    Do NOT restate the user’s request.
+    """
 
-            let resp = try await api.chatAboutDocument(documentText: documentText, messages: wire + [
-                .init(role: "user", content: revisionPrompt)
-            ])
+            let resp = try await api.chatAboutDocument(
+                documentText: documentText,
+                messages: wire + [.init(role: "user", content: revisionPrompt)]
+            )
+
+            let allowed = resp.pdfAllowed ?? false
+            guard allowed else {
+                throw NSError(domain: "PDFImprove", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: """
+    Server did not allow a PDF revision.
+
+    Build: \(resp.buildId ?? "(missing)")
+    OpenAI error: \(resp.openaiError ?? "(none)")
+    """
+                ])
+            }
 
             guard let newDraft = resp.pdfDraft else {
-                throw NSError(domain: "PDFImprove", code: 1, userInfo: [
-                    NSLocalizedDescriptionKey: "No revised PDF draft was returned."
+                throw NSError(domain: "PDFImprove", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: """
+    Server said PDF allowed, but returned no pdfDraft.
+
+    Build: \(resp.buildId ?? "(missing)")
+    OpenAI error: \(resp.openaiError ?? "(none)")
+    """
                 ])
             }
 
@@ -510,6 +558,10 @@ Do NOT restate the user’s request.
                 NSLocalizedDescriptionKey: "The PDF draft came back empty."
             ])
         }
+        
+        print("🧾 pdf draft title:", draft.title as Any)
+        print("🧾 pdf sections count:", draft.sections?.count as Any)
+        print("🧾 first section:", draft.sections?.first as Any)
 
         let pdfData = try PDFExporter.makePDF(draft: draft)
 
@@ -524,7 +576,6 @@ Do NOT restate the user’s request.
         let versionNumber = pdfVersions.count + 1
         let title = payload.title
 
-        // ✅ FIX: no makeZip argument here (matches ArtifactStore.saveBundle signature)
         let entry = try ArtifactStore.saveBundle(
             conversationId: conversationId,
             versionNumber: versionNumber,

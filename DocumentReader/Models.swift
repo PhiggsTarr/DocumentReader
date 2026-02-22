@@ -31,27 +31,37 @@ struct DocumentAnalyzeResponse: Codable, Equatable {
     let limitations: [String]?
     let suggestedQuestions: [String]?
 
+    let buildId: String?
+}
+
+// MARK: - Cited bullet
+
+struct CitedBullet: Codable, Equatable, Identifiable, Hashable {
+    var id: UUID = UUID()
+
+    let text: String
+    let source: String?
+    let citations: [LegalCitation]
+
     enum CodingKeys: String, CodingKey {
-        case docType = "doc_type"
-        case confidence
-        case summaryPlain = "summary_plain"
+        case text
+        case source
+        case citations
+    }
 
-        case simpleEnglish = "simple_english"
+    init(text: String, source: String? = nil, citations: [LegalCitation] = []) {
+        self.text = text
+        self.source = source
+        self.citations = citations
+        self.id = UUID()
+    }
 
-        case eli5Paragraphs = "eli5_paragraphs"
-        case eli5Analogy = "eli5_analogy"
-
-        case partyAnalysis = "party_analysis"
-        case whoBenefitsMost = "who_benefits_most"
-
-        case analysisParagraphs = "analysis_paragraphs"
-        case keyFacts = "key_facts"
-        case urgency
-        case nextSteps = "next_steps"
-        case redFlags = "red_flags"
-        case drafts
-        case limitations
-        case suggestedQuestions = "suggested_questions"
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        self.source = try? c.decodeIfPresent(String.self, forKey: .source)
+        self.citations = (try? c.decode([LegalCitation].self, forKey: .citations)) ?? []
+        self.id = UUID()
     }
 }
 
@@ -63,19 +73,21 @@ struct PartyBenefitsLiabilities: Codable, Identifiable, Equatable {
     let party: String
     let roleTitle: String
 
-    let benefits: [String]
-    let liabilities: [String]
-    let possiblePenalties: [String]
-    let catches: [String]
+    // ✅ citation-capable bullets
+    let benefits: [CitedBullet]
+    let liabilities: [CitedBullet]
+    let possiblePenalties: [CitedBullet]
+    let catches: [CitedBullet]
+
     let rights: [PartyRight]
 
     enum CodingKeys: String, CodingKey {
         // IMPORTANT: do NOT include `id`
         case party
-        case roleTitle = "role_title"
+        case roleTitle
         case benefits
         case liabilities
-        case possiblePenalties = "possible_penalties"
+        case possiblePenalties
         case catches
         case rights
     }
@@ -86,10 +98,24 @@ struct PartyBenefitsLiabilities: Codable, Identifiable, Equatable {
         self.party = (try? c.decode(String.self, forKey: .party)) ?? "Unknown party"
         self.roleTitle = (try? c.decode(String.self, forKey: .roleTitle)) ?? "Party"
 
-        self.benefits = (try? c.decode([String].self, forKey: .benefits)) ?? []
-        self.liabilities = (try? c.decode([String].self, forKey: .liabilities)) ?? []
-        self.possiblePenalties = (try? c.decode([String].self, forKey: .possiblePenalties)) ?? []
-        self.catches = (try? c.decode([String].self, forKey: .catches)) ?? []
+        // ✅ Backwards compatible decode:
+        // - New shape: [CitedBullet]
+        // - Old saved analyses: [String]
+        func decodeBullets(_ key: CodingKeys) -> [CitedBullet] {
+            if let bullets = try? c.decode([CitedBullet].self, forKey: key) {
+                return bullets
+            }
+            if let strings = try? c.decode([String].self, forKey: key) {
+                return strings.map { CitedBullet(text: $0) }
+            }
+            return []
+        }
+
+        self.benefits = decodeBullets(.benefits)
+        self.liabilities = decodeBullets(.liabilities)
+        self.possiblePenalties = decodeBullets(.possiblePenalties)
+        self.catches = decodeBullets(.catches)
+
         self.rights = (try? c.decode([PartyRight].self, forKey: .rights)) ?? []
 
         self.id = UUID()
@@ -124,7 +150,7 @@ struct PartyRight: Codable, Equatable, Identifiable {
     }
 }
 
-struct LegalCitation: Codable, Equatable, Identifiable {
+struct LegalCitation: Codable, Equatable, Identifiable, Hashable {
     var id: UUID = UUID()
 
     let sourceType: String   // "document" | "external"
@@ -134,7 +160,7 @@ struct LegalCitation: Codable, Equatable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         // IMPORTANT: do NOT include `id`
-        case sourceType = "source_type"
+        case sourceType
         case source
         case quote
         case url
@@ -191,10 +217,10 @@ struct Drafts: Codable, Equatable {
     let questionsForAdvisor: String?
 
     enum CodingKeys: String, CodingKey {
-        case responseDraftShort = "response_draft_short"
-        case responseDraftMedium = "response_draft_medium"
-        case responseDraftLong = "response_draft_long"
-        case questionsForAdvisor = "questions_for_advisor"
+        case responseDraftShort
+        case responseDraftMedium
+        case responseDraftLong
+        case questionsForAdvisor
     }
 
     var allDrafts: [(title: String, text: String)] {
@@ -221,16 +247,6 @@ struct KeyFacts: Codable, Equatable {
     let deadlines: [String]?
     let governingLaw: String?
     let keyPoints: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case parties
-        case dates
-        case amounts
-        case obligations
-        case deadlines
-        case governingLaw = "governing_law"
-        case keyPoints = "key_points"
-    }
 }
 
 struct LabeledValue: Codable, Identifiable, Equatable {
@@ -279,4 +295,3 @@ struct LabeledAmount: Codable, Identifiable, Equatable {
         self.id = UUID()
     }
 }
-

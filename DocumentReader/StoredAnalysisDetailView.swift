@@ -4,29 +4,22 @@
 //
 //  Created by Gboinyee Tarr on 1/14/26.
 //
-//
-//  StoredAnalysisDetailView.swift
-//  DocumentReader
-//
-//  Created by Gboinyee Tarr on 1/14/26.
-//
-
 
 import SwiftUI
 import UIKit
 
 struct StoredAnalysisDetailView: View {
     let stored: StoredAnalysis
-    
+
     @State private var decoded: DocumentAnalyzeResponse?
     @State private var copiedToast: String?
 
     private let store = DocumentStore()
-    
+
     private var documentText: String {
         stored.document?.documentText ?? ""
     }
-    
+
     private var conversationId: String {
         stored.objectID.uriRepresentation().absoluteString
     }
@@ -114,7 +107,7 @@ struct StoredAnalysisDetailView: View {
         }
     }
 
-    // (Your exportText(...) stays the same below)
+    // ✅ UPDATED: export bullets now support tappable-citation shape (CitedBullet)
     private func exportText(for result: DocumentAnalyzeResponse) -> String {
         var parts: [String] = []
         parts.append("Document type: \(result.docType ?? "Unknown")")
@@ -156,36 +149,44 @@ struct StoredAnalysisDetailView: View {
 
         if let parties = result.partyAnalysis, !parties.isEmpty {
             parts.append("Benefits, liabilities, possible penalties, and catches by party:")
+
+            // helper to export citation-capable bullet arrays
+            func exportBullets(_ title: String, _ bullets: [CitedBullet]) {
+                guard !bullets.isEmpty else { return }
+                parts.append("  \(title):")
+                for b in bullets {
+                    parts.append("  - \(b.text)")
+                    if !b.citations.isEmpty {
+                        parts.append("    Citations:")
+                        for c in b.citations {
+                            parts.append("    - \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
+                        }
+                    }
+                }
+            }
+
             for p in parties {
                 parts.append("\n\(p.party):")
 
-                if !p.benefits.isEmpty {
-                    parts.append("  Benefits:")
-                    parts.append(contentsOf: p.benefits.map { "  - \($0)" })
-                }
-
-                if !p.liabilities.isEmpty {
-                    parts.append("  Liabilities / obligations:")
-                    parts.append(contentsOf: p.liabilities.map { "  - \($0)" })
-                }
-
-                if !p.possiblePenalties.isEmpty {
-                    parts.append("  Possible penalties / consequences:")
-                    parts.append(contentsOf: p.possiblePenalties.map { "  - \($0)" })
-                }
-
-                if !p.catches.isEmpty {
-                    parts.append("  Catches / gotchas:")
-                    parts.append(contentsOf: p.catches.map { "  - \($0)" })
-                }
+                exportBullets("Benefits", p.benefits)
+                exportBullets("Liabilities / obligations", p.liabilities)
+                exportBullets("Possible penalties / consequences", p.possiblePenalties)
+                exportBullets("Catches / gotchas", p.catches)
 
                 if !p.rights.isEmpty {
                     parts.append("  Rights:")
                     for r in p.rights {
                         parts.append("  - \(r.right): \(r.details)")
+                        if !r.citations.isEmpty {
+                            parts.append("    Citations:")
+                            for c in r.citations {
+                                parts.append("    - \(c.source)\(c.quote.map { " — “\($0)”" } ?? "")")
+                            }
+                        }
                     }
                 }
             }
+
             parts.append("")
         }
 
@@ -211,12 +212,11 @@ struct StoredAnalysisDetailView: View {
     }
 }
 
-
 extension DocumentStore {
-//    func decodeAnalysis(_ stored: StoredAnalysis) -> DocumentAnalyzeResponse? {
-//        guard let data = stored.analysisJSON else { return nil }   // ✅ Data?
-//        return decodeDocumentAnalyzeResponse(from: data)
-//    }
+    //    func decodeAnalysis(_ stored: StoredAnalysis) -> DocumentAnalyzeResponse? {
+    //        guard let data = stored.analysisJSON else { return nil }   // ✅ Data?
+    //        return decodeDocumentAnalyzeResponse(from: data)
+    //    }
 
     private func decodeDocumentAnalyzeResponse(from data: Data) -> DocumentAnalyzeResponse? {
         do {
@@ -229,4 +229,3 @@ extension DocumentStore {
         }
     }
 }
-

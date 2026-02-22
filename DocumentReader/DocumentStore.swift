@@ -2,6 +2,8 @@
 //  DocumentStore.swift
 //  DocumentReader
 //
+//  Saves a StoredDocument (text/hash/file metadata) + a related StoredAnalysis (analysis JSON + export)
+//  Adds backwards-compatible decoding for legacy saved analyses.
 //  Created by Gboinyee Tarr on 1/13/26.
 //
 
@@ -9,36 +11,6 @@ import Foundation
 import CoreData
 import CryptoKit
 import SwiftUI
-import VisionKit
-import UniformTypeIdentifiers
-
-// MARK: - Model
-
-struct ImportedDocument: Identifiable {
-    let id = UUID()
-    let displayName: String
-    let localURL: URL
-    let kind: Kind
-    
-    enum Kind {
-        case pdf
-        case image
-        case file
-    }
-}
-//
-//  DocumentStore.swift
-//  DocumentReader
-//
-//  Saves a StoredDocument (text/hash/file metadata) + a related StoredAnalysis (analysis JSON + export)
-//  so your Core Data model matches your screenshots.
-//
-//  Created by Gboinyee Tarr on 1/13/26.
-//
-
-import Foundation
-import CoreData
-import CryptoKit
 
 @MainActor
 final class DocumentStore: ObservableObject {
@@ -76,7 +48,7 @@ final class DocumentStore: ObservableObject {
         doc.docType = analysis.docType ?? "Document"
         doc.documentText = documentText
         doc.textHash = hash
-        doc.fileURL = fileURL?.absoluteString   // <-- your model shows `fileURL` on StoredDocument (String)
+        doc.fileURL = fileURL?.absoluteString
 
         // 3) Create the analysis (StoredAnalysis holds analysis JSON + export)
         let a = StoredAnalysis(context: moc)
@@ -92,8 +64,6 @@ final class DocumentStore: ObservableObject {
         a.whoBenefitsMostConfidence = analysis.whoBenefitsMost?.confidence ?? 0
 
         a.exportText = exportText
-
-        // Your StoredAnalysis model shows `fileURLString` (String)
         a.fileURLString = fileURL?.absoluteString
 
         // Encode the full response to Binary Data (analysisJSON)
@@ -118,9 +88,41 @@ final class DocumentStore: ObservableObject {
     }
 
     /// Decode the saved JSON from a StoredAnalysis back into `DocumentAnalyzeResponse`.
+    ///
+    /// Backwards-compatible:
+    /// - New payloads (snake_case + CodingKeys) decode normally
+    /// - Old payloads (camelCase / older encoding) are tried via a legacy decoder
+    /// - If legacy succeeds, we migrate `analysisJSON` in place so future loads are fast/consistent
     func decodeAnalysis(_ storedAnalysis: StoredAnalysis) -> DocumentAnalyzeResponse? {
-        guard let data = storedAnalysis.analysisJSON else { return nil }
-        return decodeDocumentAnalyzeResponse(from: data)
+        guard let data = storedAnalysis.analysisJSON, !data.isEmpty else {
+            print("❌ decodeAnalysis: analysisJSON missing/empty")
+            return nil
+        }
+
+        // Try modern decode first
+        if let modern = decodeModernDocumentAnalyzeResponse(data) {
+            // Heuristic: if decode "succeeds" but the object is mostly empty, treat it as a legacy payload
+            let looksEmpty =
+                (modern.docType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
+                (modern.summaryPlain?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) &&
+                (modern.partyAnalysis?.isEmpty ?? true) &&
+                (modern.analysisParagraphs?.isEmpty ?? true)
+
+            if looksEmpty, let legacy = decodeLegacyDocumentAnalyzeResponse(data) {
+                migrateStoredAnalysisJSONIfNeeded(storedAnalysis, analysis: legacy)
+                return legacy
+            }
+
+            return modern
+        }
+
+        // Fallback to legacy decode
+        if let legacy = decodeLegacyDocumentAnalyzeResponse(data) {
+            migrateStoredAnalysisJSONIfNeeded(storedAnalysis, analysis: legacy)
+            return legacy
+        }
+
+        return nil
     }
 
     /// Convenience: get the "latest" analysis for a given StoredDocument and decode it.
@@ -128,7 +130,9 @@ final class DocumentStore: ObservableObject {
         guard let analyses = document.analyses as? Set<StoredAnalysis>, !analyses.isEmpty else {
             return nil
         }
-        let latest = analyses.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }.first
+        let latest = analyses
+            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+            .first
         guard let a = latest else { return nil }
         return decodeAnalysis(a)
     }
@@ -154,18 +158,55 @@ final class DocumentStore: ObservableObject {
         return try moc.fetch(req)
     }
 
-    // MARK: - Helpers
+    // MARK: - Decoding helpers (modern + legacy)
 
-    private func decodeDocumentAnalyzeResponse(from data: Data) -> DocumentAnalyzeResponse? {
+    /// Modern decode path: your current model decoding expectations.
+    private func decodeModernDocumentAnalyzeResponse(_ data: Data) -> DocumentAnalyzeResponse? {
         do {
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
             return try decoder.decode(DocumentAnalyzeResponse.self, from: data)
         } catch {
-            print("❌ decodeAnalysis failed:", error)
+            print("❌ decodeAnalysis modern failed:", error)
             return nil
         }
     }
+
+    /// Legacy decode path: handles older saved JSON that was encoded with different key conventions.
+    ///
+    /// NOTE:
+    /// If your old saved payload used camelCase keys (docType, summaryPlain, partyAnalysis, etc.),
+    /// this decoder often succeeds where the modern one yields an "empty" object.
+    private func decodeLegacyDocumentAnalyzeResponse(_ data: Data) -> DocumentAnalyzeResponse? {
+        do {
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .useDefaultKeys
+            return try decoder.decode(DocumentAnalyzeResponse.self, from: data)
+        } catch {
+            print("❌ decodeAnalysis legacy failed:", error)
+            return nil
+        }
+    }
+
+    /// Migrates stored JSON to the latest encoding format.
+    private func migrateStoredAnalysisJSONIfNeeded(_ stored: StoredAnalysis, analysis: DocumentAnalyzeResponse) {
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let newData = try encoder.encode(analysis)
+
+            // Only write if it actually changed (avoid needless saves)
+            if stored.analysisJSON != newData {
+                stored.analysisJSON = newData
+                try moc.save()
+                print("✅ Migrated legacy saved analysisJSON to latest format")
+            }
+        } catch {
+            print("❌ migrateStoredAnalysisJSONIfNeeded failed:", error)
+        }
+    }
+
+    // MARK: - Helpers
 
     private func sha256(_ input: String) -> String {
         let digest = SHA256.hash(data: Data(input.utf8))

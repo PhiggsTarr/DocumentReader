@@ -36,13 +36,15 @@ type PartyRight = {
   citations: LegalCitation[];
 };
 
+type CitedBullet = { text: string; citations: LegalCitation[] };
+
 type PartyBenefitsLiabilitiesPenalties = {
   party: string;
   role_title: string;
-  benefits: string[];
-  liabilities: string[];
-  possible_penalties: string[];
-  catches: string[];
+  benefits: CitedBullet[];
+  liabilities: CitedBullet[];
+  possible_penalties: CitedBullet[];
+  catches: CitedBullet[];
   rights: PartyRight[];
 };
 
@@ -252,19 +254,27 @@ function fallbackResponse(detailLevel: DetailLevel, reason: string): DocumentAna
 	  {
 		party: "Party A",
 		role_title: "Party 1",
-		benefits: ["Clear expectations"],
-		liabilities: ["May have duties, deadlines, or restrictions"],
-		possible_penalties: ["Possible fees, damages, or termination if obligations are not met (depends on the document)"],
-		catches: ["Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)"],
+		  benefits: [{ text: "Clear expectations", citations: [] }],
+		  liabilities: [{ text: "May have duties, deadlines, or restrictions", citations: [] }],
+		  possible_penalties: [
+			{ text: "Possible fees, damages, or termination if obligations are not met (depends on the document)", citations: [] },
+		  ],
+		  catches: [
+			{ text: "Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)", citations: [] },
+		  ],
 		rights: [],
 	  },
 	  {
 		party: "Party B",
 		role_title: "Party 2",
-		benefits: ["Clear expectations"],
-		liabilities: ["May have duties, deadlines, or restrictions"],
-		possible_penalties: ["Possible fees, damages, or termination if obligations are not met (depends on the document)"],
-		catches: ["Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)"],
+		  benefits: [{ text: "Clear expectations", citations: [] }],
+		  liabilities: [{ text: "May have duties, deadlines, or restrictions", citations: [] }],
+		  possible_penalties: [
+			{ text: "Possible fees, damages, or termination if obligations are not met (depends on the document)", citations: [] },
+		  ],
+		  catches: [
+			{ text: "Some terms may be one-sided or have exceptions that reduce the benefit (depends on the document)", citations: [] },
+		  ],
 		rights: [],
 	  },
 	],
@@ -315,6 +325,8 @@ function isAbusiveOrOffTopicRequest(text: string): boolean {
 	"cunt",
 	"nigger",
 	"fag",
+	"dick",
+	"pussy",
 	"retard",
 	"kill yourself",
 	"die",
@@ -361,26 +373,29 @@ function userWantsPDF(messages: ChatMessage[]): boolean {
 
   const triggers = [
 	"pdf",
+	"create a pdf",
+	"make a pdf",
 	"draft a letter",
 	"draft a response",
 	"formal response",
-	"generate a response",
 	"write a letter",
 	"export",
 	"download",
+	"print",
 	"send to",
-	"custom letter",
+	"submit to",
   ];
 
   const wants = triggers.some((t) => lastUser.includes(t));
   if (!wants) return false;
 
-  // Hard gates
+  // Keep the only true hard gate here:
   if (isAbusiveOrOffTopicRequest(lastUserRaw)) return false;
-  if (!looksLikeDocumentQuestion(lastUserRaw)) return false;
 
+  // ✅ Do NOT require looksLikeDocumentQuestion here.
   return true;
 }
+
 
 function sanitizeForPdf(text: string): string {
   const t = (text || "").trim();
@@ -582,10 +597,10 @@ Match this exact JSON shape:
 	{
 	  "party": string,
 	  "role_title": string,
-	  "benefits": [string],
-	  "liabilities": [string],
-	  "possible_penalties": [string],
-	  "catches": [string],
+"benefits": [{ "text": string, "citations": [{ "source_type": "document"|"external", "source": string, "quote": string|null, "url": string|null }] }],
+"liabilities": [{ "text": string, "citations": [{ "source_type": "document"|"external", "source": string, "quote": string|null, "url": string|null }] }],
+"possible_penalties": [{ "text": string, "citations": [{ "source_type": "document"|"external", "source": string, "quote": string|null, "url": string|null }] }],
+"catches": [{ "text": string, "citations": [{ "source_type": "document"|"external", "source": string, "quote": string|null, "url": string|null }] }],
 	  "rights": [
 		{
 		  "right": string,
@@ -629,6 +644,7 @@ Match this exact JSON shape:
 }
 
 Rules:
+- For benefits/liabilities/possible_penalties/catches: ALWAYS return objects with "text" and "citations" (citations may be empty).
 - simple_english: ~6th–8th grade reading level.
 - eli5_paragraphs: EXACTLY 2.
 - analysis_paragraphs: EXACTLY 3.
@@ -820,7 +836,7 @@ Rules:
 		  }
 
 		  // ✅ SERVER-SIDE OVERRIDE: even if model returns pdf_draft, block it if request becomes abusive/off-topic
-		  if (isAbusiveOrOffTopicRequest(lastUser) || !looksLikeDocumentQuestion(lastUser)) {
+			if (isAbusiveOrOffTopicRequest(lastUser)) {
 			return json(
 			  {
 				reply:

@@ -31,6 +31,12 @@ struct ContentView: View {
     @State private var showPaywall = false
     @State private var lightingWarning: String? = nil
     @State private var showDimLightAlert: Bool = false
+    @State private var showChatForLatest = false
+    @State private var glow = false
+    @State private var deepAnalysisResult: DocumentAnalyzeResponse? = nil
+    @State private var deepAnalysisSourceHash: String? = nil   // ties deep analysis to a specific document text
+    
+    @State private var progressCreepTask: Task<Void, Never>? = nil
 
     private let apiClient = APIClient()
     private let ocrService = OCRService()
@@ -68,6 +74,12 @@ struct ContentView: View {
                             resultPreview(result: result)
                                 .padding(.horizontal, DS.pagePadding)
 
+                            // ✅ Deeper Analysis summary preview (only after it exists)
+                            if let deep = deepAnalysisResult {
+                                deepResultPreview(result: deep)
+                                    .padding(.horizontal, DS.pagePadding)
+                            }
+
                             resultsActions(result: result)
                                 .padding(.horizontal, DS.pagePadding)
                         }
@@ -78,7 +90,13 @@ struct ContentView: View {
                         Spacer(minLength: 30)
                     }
                     .padding(.top, 12)
+                    
+                    Text("We can make mistakes • Check important info. • Not legal advice")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.65))
                 }
+                
+                
             }
             .navigationTitle("Document Scanner")
             .navigationBarTitleDisplayMode(.inline)
@@ -245,6 +263,33 @@ struct ContentView: View {
         }
         .padding(.horizontal, DS.pagePadding)
     }
+    
+    @MainActor
+    private func startProgressCreep(from start: Double = 0.55, to end: Double = 0.99) {
+        progressCreepTask?.cancel()
+
+        progressCreepTask = Task { @MainActor in
+            var current = start
+            // creep upwards in small steps every ~350ms
+            while !Task.isCancelled, current < end, isLoading {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+
+                // ease: slower as it approaches end
+                let remaining = end - current
+                let step = max(0.002, remaining * 0.08) // adaptive step
+                current = min(end, current + step)
+
+                progressModel.moveTo(cap: current)
+            }
+        }
+    }
+
+    @MainActor
+    private func stopProgressCreep() {
+        progressCreepTask?.cancel()
+        progressCreepTask = nil
+    }
+
 
     private func attemptStartScan() {
         guard !isLoading else { return }
@@ -269,47 +314,178 @@ struct ContentView: View {
     // MARK: - Result preview + actions (DEFINED here so your "cannot find" errors go away)
 
     private func resultPreview(result: DocumentAnalyzeResponse) -> some View {
-        Card("Latest result", icon: "sparkles", tint: .purple) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(result.docType ?? "Unknown")
-                        .font(.headline)
-                    Spacer()
-                    if let c = result.confidence {
-                        Text("\(Int(c * 100))%")
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundStyle(.secondary)
+        NavigationLink {
+            AnalysisResultView(result: result, documentText: lastDocumentText, canSave: true)
+        } label: {
+            Card("Latest result", icon: "sparkles", tint: .purple) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text(displayDocType(result.docType))
+                            .font(.headline)
+                        Spacer()
+                        if let c = result.confidence {
+                            Text("\(Int(c * 100))%")
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(result.summaryPlain ?? "No summary returned.")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider().opacity(0.25)
+
+                    // Optional: keep the hint row (still opens Analysis because the whole card is a link)
+                    NavigationLink {
+                        AnalysisResultView(result: result, documentText: lastDocumentText, canSave: true)
+                    } label: {
+                        rowLink(icon: "text.magnifyingglass", title: "Tap anywhere to view analysis")
+                    }
+
+                    Divider().opacity(0.35)
+
+                    NavigationLink {
+                        ChatView(
+                            conversationId: ConversationId.fromDocumentText(lastDocumentText),
+                            documentText: lastDocumentText,
+                            suggestedQuestions: result.suggestedQuestions ?? []
+                        )
+                    } label: {
+                        rowLink(icon: "bubble.left.and.bubble.right", title: "Chat about this document")
                     }
                 }
-
-                Text(result.summaryPlain ?? "No summary returned.")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain) // so it doesn’t look like a big blue link
+        .sheet(isPresented: $showChatForLatest) {
+            NavigationStack {
+                ChatView(
+                    conversationId: ConversationId.fromDocumentText(lastDocumentText),
+                    documentText: lastDocumentText,
+                    suggestedQuestions: result.suggestedQuestions ?? []
+                )
             }
         }
     }
+    
+    private func deepResultPreview(result: DocumentAnalyzeResponse) -> some View {
+        NavigationLink {
+            AnalysisResultView(result: result, documentText: lastDocumentText, canSave: true)
+        } label: {
+            Card("Deeper Analysis Summary", icon: "brain.head.profile", tint: .indigo) {
+                VStack(alignment: .leading, spacing: 10) {
+
+                    HStack {
+                        Text(displayDocType(result.docType))
+                            .font(.headline)
+                        Spacer()
+                        if let c = result.confidence {
+                            Text("\(Int(c * 100))%")
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(result.summaryPlain ?? "No summary returned.")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider().opacity(0.25)
+
+                    rowLink(icon: "text.magnifyingglass", title: "Tap anywhere to view analysis")
+                        .opacity(0.85)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func displayDocType(_ raw: String?) -> String {
+        let s = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return "Unknown" }
+
+        // If it's already human-friendly (has spaces and any uppercase), keep it
+        if s.contains(" ") && s.rangeOfCharacter(from: .uppercaseLetters) != nil {
+            return s
+        }
+
+        // Convert snake_case / kebab-case to Title Case
+        let normalized = s
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+
+        return normalized
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { word -> String in
+                let w = String(word).lowercased()
+                // keep common acronyms uppercase
+                if ["pdf", "usa", "llc", "inc", "w2", "i9", "ssn"].contains(w) { return w.uppercased() }
+                return w.prefix(1).uppercased() + w.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+
 
     private func resultsActions(result: DocumentAnalyzeResponse) -> some View {
-        Card("Next", icon: "arrow.right.circle.fill", tint: .mint) {
-            VStack(spacing: 10) {
-                NavigationLink {
-                    AnalysisResultView(result: result, documentText: lastDocumentText, canSave: true)
-                } label: {
-                    rowLink(icon: "text.magnifyingglass", title: "View Analysis")
+
+        let currentHash = docHash(lastDocumentText)
+        let alreadyRanForThisDoc = (deepAnalysisSourceHash == currentHash) && (deepAnalysisResult != nil)
+
+        let canDeepAnalyze =
+            !alreadyRanForThisDoc &&
+            !isLoading &&
+            !lastDocumentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            purchaseManager.canRunDeepAnalysis()
+
+        return Card("Deeper Analysis", icon: "brain.head.profile", tint: .indigo) {
+            VStack(alignment: .leading, spacing: 12) {
+
+                Text("Get a deeper analysis for even more insight.")
+                    .font(.subheadline.weight(.semibold))
+
+                Text("This expands the breakdown, surfaces hidden risks, and explains complex clauses in greater detail. May take a few minutes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if alreadyRanForThisDoc {
+                    Text("Deeper Analysis already generated for this document.")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
 
-                Divider().opacity(0.35)
-
-                NavigationLink {
-                    ChatView(
-                        conversationId: ConversationId.fromDocumentText(lastDocumentText),
-                        documentText: lastDocumentText,
-                        suggestedQuestions: result.suggestedQuestions ?? []
-                    )
-                } label: {
-                    rowLink(icon: "bubble.left.and.bubble.right", title: "Chat about this document")
+                if !purchaseManager.isPro {
+                    Text("Uses 1 additional scan.")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
+
+                if !purchaseManager.isPro && !purchaseManager.canRunDeepAnalysis() {
+                    Text("You need at least 2 scans remaining to run Deeper Analysis.")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider().opacity(0.25)
+
+                Button {
+                    runDeepAnalysis() // we’ll update this next
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                        Text(isLoading ? "Deep analyzing…" : (alreadyRanForThisDoc ? "Deeper Analysis Complete" : "Run Deeper Analysis"))
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canDeepAnalyze)
             }
         }
     }
@@ -546,6 +722,11 @@ struct ContentView: View {
         progressModel.stop()
         isLoading = false
     }
+    
+    private func docHash(_ text: String) -> String {
+        // quick + stable enough for gating; if you want SHA256, you can reuse your SaveAnalysisCard helper
+        String(text.trimmingCharacters(in: .whitespacesAndNewlines).hashValue)
+    }
 
     // MARK: - Unified flow (Camera images OR PDF-rendered images)
 
@@ -557,6 +738,8 @@ struct ContentView: View {
         lastDocumentText = ""
         lightingWarning = nil
         showDimLightAlert = false
+        deepAnalysisResult = nil
+        deepAnalysisSourceHash = nil
 
         progressModel.start()
         progressModel.moveTo(cap: 0.18)
@@ -591,11 +774,18 @@ struct ContentView: View {
             }
 
             lastDocumentText = trimmed
-            progressModel.moveTo(cap: 0.90)
+            progressModel.moveTo(cap: 0.99)
+
+            // ✅ creep while waiting on network (keeps UI alive)
+            progressModel.startCreep(to: 1.00)
 
             try Task.checkCancellation()
 
-            let result = try await apiClient.analyzeDocument(text: trimmed)
+            let result = try await apiClient.analyzeDocument(text: trimmed, detailLevel: .short)
+
+            // ✅ stop creep once we have a result
+            progressModel.stopCreep()
+
             try Task.checkCancellation()
 
             analysisResult = result
@@ -607,14 +797,85 @@ struct ContentView: View {
             purchaseManager.consumeFreeScanIfNeeded()
 
         } catch is CancellationError {
+            progressModel.stopCreep()
             progressModel.stop()
             return
         } catch {
+            progressModel.stopCreep()
             progressModel.stop()
             errorMessage = error.localizedDescription
             print("❌ Flow failed:", error)
         }
     }
+    
+    @MainActor
+    private func runDeepAnalysis() {
+        guard !isLoading else { return }
+        guard !lastDocumentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // ✅ Hard gate
+        guard purchaseManager.canRunDeepAnalysis() else {
+            // Choose your behavior: show paywall or show a friendly error
+            if purchaseManager.isPro {
+                errorMessage = "Unable to run Deeper Analysis right now."
+            } else {
+                errorMessage = "Deeper Analysis uses 1 additional scan. You need at least 2 scans remaining."
+                showPaywall = true // optional: send them to paywall
+            }
+            return
+        }
+
+        analysisTask?.cancel()
+        purchaseManager.lastErrorMessage = nil
+
+        analysisTask = Task { @MainActor in
+            isLoading = true
+            errorMessage = nil
+
+            progressModel.start()
+            progressModel.moveTo(cap: 0.25)
+
+            defer {
+                progressModel.stopCreep()
+                isLoading = false
+            }
+
+            do {
+                try Task.checkCancellation()
+
+                progressModel.moveTo(cap: 0.55)
+                progressModel.startCreep(to: 0.99)
+
+                let deep = try await apiClient.analyzeDocument(text: lastDocumentText, detailLevel: .long)
+
+                try Task.checkCancellation()
+
+                progressModel.stopCreep()
+
+                analysisResult = deep
+                deepAnalysisResult = deep
+                deepAnalysisSourceHash = docHash(lastDocumentText)
+
+                recents.add(fullText: lastDocumentText, analysis: deep)
+
+                progressModel.finishAndDismiss()
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                // ✅ Consume the *extra* deep-analysis scan only after success
+                purchaseManager.consumeDeepAnalysisScanIfNeeded()
+
+            } catch is CancellationError {
+                progressModel.stopCreep()
+                progressModel.stop()
+            } catch {
+                progressModel.stopCreep()
+                progressModel.stop()
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+
+
 }
 
 // MARK: - Local subviews

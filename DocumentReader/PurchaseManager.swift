@@ -124,6 +124,21 @@ final class PurchaseManager: ObservableObject {
     }
 
     // MARK: - Scan gating
+    
+    /// Deep Analysis costs 1 additional scan for non-Pro users.
+    /// We require 2+ remaining before starting (so they have the base scan + the deep scan).
+    func canRunDeepAnalysis() -> Bool {
+        if isPro { return true }
+        return freeScansRemaining >= 2
+    }
+
+    /// Consume the extra scan for Deep Analysis (non-Pro only)
+    func consumeDeepAnalysisScanIfNeeded() {
+        guard !isPro else { return }
+        guard freeScansRemaining > 0 else { return }
+        freeScansRemaining -= 1
+        defaults.set(freeScansRemaining, forKey: scansKey)
+    }
 
     func canScan() -> Bool {
         if isPro { return true }
