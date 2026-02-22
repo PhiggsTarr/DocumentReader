@@ -47,7 +47,7 @@ struct RecentDocumentDetailView: View {
                         Card("Actions") {
                             VStack(spacing: 12) {
                                 NavigationLink {
-                                    AnalysisResultView(result: result, documentText: recent.fullText)
+                                    AnalysisResultView(result: result, documentText: recent.fullText, canSave: false)
                                 } label: {
                                     Text("View Results")
                                         .frame(maxWidth: .infinity)
@@ -55,7 +55,7 @@ struct RecentDocumentDetailView: View {
                                 .buttonStyle(.plain)
 
                                 NavigationLink {
-                                    ChatView(documentText: recent.fullText,
+                                    ChatView(conversationId: UUID().uuidString, documentText: recent.fullText,
                                              suggestedQuestions: result.suggestedQuestions ?? [])
                                 } label: {
                                     Text("Chat about this document")

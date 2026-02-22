@@ -1,11 +1,3 @@
-//
-//  PDFExporter.swift
-//  DocumentReader
-//
-//  Created by Gboinyee Tarr on 1/12/26.
-//
-
-
 import Foundation
 import UIKit
 
@@ -17,94 +9,118 @@ enum PDFExporter {
         var titleFont: UIFont = .systemFont(ofSize: 20, weight: .bold)
         var headingFont: UIFont = .systemFont(ofSize: 14, weight: .semibold)
         var bodyFont: UIFont = .systemFont(ofSize: 12, weight: .regular)
-        var lineSpacing: CGFloat = 4
+        var paragraphSpacing: CGFloat = 10
     }
 
     /// Renders a simple, professional PDF from a structured draft.
     static func makePDF(draft: PDFDraft, options: RenderOptions = .init()) throws -> Data {
+
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: options.pageSize))
 
         let data = renderer.pdfData { ctx in
-            var currentY: CGFloat = options.margin
-            var pageNumber = 1
+            let pageRect = CGRect(origin: .zero, size: options.pageSize)
+            let contentWidth = options.pageSize.width - options.margin * 2
 
-            func newPage() {
+            // Always render black ink on white page for consistency
+            let ink = UIColor.black
+
+            func beginPage() {
                 ctx.beginPage()
-                currentY = options.margin
-                pageNumber += 1
+                // Fill white background (some viewers behave oddly if not explicit)
+                ctx.cgContext.setFillColor(UIColor.white.cgColor)
+                ctx.cgContext.fill(pageRect)
             }
 
-            func drawText(_ text: String, font: UIFont, spacingAfter: CGFloat) {
-                let availableWidth = options.pageSize.width - options.margin * 2
-                let attr: [NSAttributedString.Key: Any] = [
+            func attributed(_ string: String, font: UIFont) -> NSAttributedString {
+                NSAttributedString(string: string, attributes: [
                     .font: font,
-                    .foregroundColor: UIColor.label
-                ]
+                    .foregroundColor: ink
+                ])
+            }
 
-                let attributed = NSAttributedString(string: text, attributes: attr)
-                let framesetter = CTFramesetterCreateWithAttributedString(attributed)
+            /// Draws attributed text with pagination; returns updated y
+            func drawBlock(_ block: NSAttributedString, startY: CGFloat) -> CGFloat {
+                var y = startY
+                var remaining = block
 
-                var currentRange = CFRangeMake(0, attributed.length)
-
-                while currentRange.length > 0 {
-                    let maxHeight = options.pageSize.height - options.margin - currentY
-                    if maxHeight < 60 { // not enough room -> new page
-                        newPage()
+                while remaining.length > 0 {
+                    let maxHeight = options.pageSize.height - options.margin - y
+                    if maxHeight < 40 {
+                        beginPage()
+                        y = options.margin
                     }
 
-                    let pathRect = CGRect(x: options.margin, y: currentY, width: availableWidth, height: options.pageSize.height - options.margin - currentY)
-                    let path = CGPath(rect: pathRect, transform: nil)
+                    let drawRect = CGRect(x: options.margin, y: y, width: contentWidth, height: maxHeight)
 
-                    let frame = CTFramesetterCreateFrame(framesetter, currentRange, path, nil)
-                    let lines = CTFrameGetLines(frame) as NSArray
-                    if lines.count == 0 {
-                        break
-                    }
-
-                    // Measure consumed height
-                    var lineOrigins = Array(repeating: CGPoint.zero, count: lines.count)
-                    CTFrameGetLineOrigins(frame, CFRangeMake(0, 0), &lineOrigins)
-
-                    var lastLineY: CGFloat = 0
-                    if let last = lineOrigins.last {
-                        lastLineY = last.y
-                    }
-
-                    let consumedHeight = (pathRect.height - lastLineY) + spacingAfter
+                    // Find how much fits on this page
+                    let fitRange = visibleRange(for: remaining, in: drawRect)
+                    let visible = remaining.attributedSubstring(from: fitRange)
 
                     // Draw
-                    ctx.cgContext.saveGState()
-                    ctx.cgContext.textMatrix = .identity
-                    ctx.cgContext.translateBy(x: 0, y: options.pageSize.height)
-                    ctx.cgContext.scaleBy(x: 1, y: -1)
-                    CTFrameDraw(frame, ctx.cgContext)
-                    ctx.cgContext.restoreGState()
+                    visible.draw(with: drawRect, options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
 
-                    // Advance range
-                    let visibleRange = CTFrameGetVisibleStringRange(frame)
-                    let usedLen = visibleRange.length
-                    currentRange = CFRangeMake(currentRange.location + usedLen, currentRange.length - usedLen)
+                    // Advance y based on actual drawn height
+                    let usedHeight = visible.boundingRect(
+                        with: CGSize(width: contentWidth, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        context: nil
+                    ).height
 
-                    // Advance Y
-                    currentY += consumedHeight
+                    y += ceil(usedHeight) + options.paragraphSpacing
 
-                    // If more text remains, start a new page
-                    if currentRange.length > 0 {
-                        newPage()
+                    // Remove what we drew
+                    if fitRange.length >= remaining.length {
+                        break
+                    } else {
+                        remaining = remaining.attributedSubstring(from: NSRange(location: fitRange.location + fitRange.length,
+                                                                               length: remaining.length - fitRange.length))
+                    }
+
+                    // Next page if still remaining
+                    if remaining.length > 0 {
+                        beginPage()
+                        y = options.margin
                     }
                 }
+
+                return y
+            }
+
+            /// Determines visible substring range that fits within rect height.
+            func visibleRange(for text: NSAttributedString, in rect: CGRect) -> NSRange {
+                // Binary search length that fits
+                var low = 0
+                var high = text.length
+                var best = 0
+
+                while low <= high {
+                    let mid = (low + high) / 2
+                    let sub = text.attributedSubstring(from: NSRange(location: 0, length: mid))
+                    let h = sub.boundingRect(
+                        with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        context: nil
+                    ).height
+
+                    if h <= rect.height {
+                        best = mid
+                        low = mid + 1
+                    } else {
+                        high = mid - 1
+                    }
+                }
+
+                // Avoid returning 0 (infinite loop) by forcing at least a small chunk
+                return NSRange(location: 0, length: max(best, min(200, text.length)))
             }
 
             // Start first page
-            ctx.beginPage()
+            beginPage()
+            var y: CGFloat = options.margin
 
             // Title
-            let title = draft.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let title, !title.isEmpty {
-                drawText(title + "\n", font: options.titleFont, spacingAfter: 10)
-            } else {
-                drawText("Draft Response\n", font: options.titleFont, spacingAfter: 10)
-            }
+            let title = (draft.title ?? "Draft Response").trimmingCharacters(in: .whitespacesAndNewlines)
+            y = drawBlock(attributed(title + "\n", font: options.titleFont), startY: y)
 
             // Sections
             let sections = draft.sections ?? []
@@ -113,10 +129,10 @@ enum PDFExporter {
                 let body = (sec.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
                 if !heading.isEmpty {
-                    drawText(heading + "\n", font: options.headingFont, spacingAfter: 6)
+                    y = drawBlock(attributed(heading + "\n", font: options.headingFont), startY: y)
                 }
                 if !body.isEmpty {
-                    drawText(body + "\n\n", font: options.bodyFont, spacingAfter: 10)
+                    y = drawBlock(attributed(body + "\n", font: options.bodyFont), startY: y)
                 }
             }
         }

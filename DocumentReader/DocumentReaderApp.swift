@@ -9,9 +9,23 @@ import SwiftUI
 
 @main
 struct DocumentReaderApp: App {
+    let persistence = PersistenceController.shared
+    @StateObject private var purchaseManager = PurchaseManager.shared
+  //  @EnvironmentObject private var store = DocumentStore()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environment(\.managedObjectContext, persistence.container.viewContext)
+                .environmentObject(purchaseManager)
+          //      .environmentObject(store)
+                .preferredColorScheme(.dark)
         }
     }
 }
+
+
+//Button("Terms") { showTerms = true }
+//.sheet(isPresented: $showTerms) {
+//    TermsAndConditionsView { }
+//}

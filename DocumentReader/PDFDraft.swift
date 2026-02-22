@@ -39,4 +39,8 @@ struct PDFDraftSection: Codable, Equatable, Identifiable {
     let id = UUID()
     var heading: String?
     var body: String?
+
+    enum CodingKeys: String, CodingKey {
+        case heading, body
+    }
 }

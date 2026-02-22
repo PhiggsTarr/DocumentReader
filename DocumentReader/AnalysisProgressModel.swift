@@ -5,8 +5,10 @@
 //  Created by Gboinyee Tarr on 1/11/26.
 //
 
-
 import SwiftUI
+import Lottie
+
+// MARK: - Model
 
 @MainActor
 final class AnalysisProgressModel: ObservableObject {
@@ -14,11 +16,21 @@ final class AnalysisProgressModel: ObservableObject {
     @Published var progress: Double = 0.0 // 0...1
     @Published var statusText: String = "Analyzing"
 
+    /// Lottie file name (NO .json)
+    let lottieName: String = "BookFlipper"
+
     private let statuses = ["Analyzing", "Interpreting", "Researching", "Summarizing", "Drafting"]
     private var statusIndex: Int = 0
 
     private var progressTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
+
+    private var progressCap: Double = 0.15
+    private var creepTask: Task<Void, Never>?
+
+    // ✅ Fix: lock the status once progress crosses 95%
+    private var isFinishingUpLocked: Bool = false
+    private let finishingUpThreshold: Double = 0.89
 
     func start() {
         stop()
@@ -27,25 +39,38 @@ final class AnalysisProgressModel: ObservableObject {
         statusIndex = 0
         statusText = statuses[statusIndex]
         isPresented = true
+        isFinishingUpLocked = false
 
-        // Smooth fake progress
         progressTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled, self.isPresented {
-                try? await Task.sleep(nanoseconds: 120_000_000) // 0.12s
-                // Slowly creep upward, but don't exceed current "cap"
-                // Cap will be controlled by moveTo(...)
+                try? await Task.sleep(nanoseconds: 120_000_000)
+
                 if self.progress < 0.98 {
                     self.progress = min(self.progress + 0.006, self.progressCap)
+                }
+
+                // ✅ When we cross 95%, lock status text to finishing message
+                if !self.isFinishingUpLocked, self.progress >= self.finishingUpThreshold {
+                    self.isFinishingUpLocked = true
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        self.statusText = """
+Preparing your results
+Please be patient 
+"""
+                    }
                 }
             }
         }
 
-        // Rotate words every 2 seconds
         statusTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled, self.isPresented {
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+                // ✅ Gate rotating statuses once we’re in “finishing up” state
+                if self.isFinishingUpLocked { continue }
+
                 self.statusIndex = (self.statusIndex + 1) % self.statuses.count
                 withAnimation(.easeInOut(duration: 0.25)) {
                     self.statusText = self.statuses[self.statusIndex]
@@ -54,10 +79,6 @@ final class AnalysisProgressModel: ObservableObject {
         }
     }
 
-    /// Where the fake progress is allowed to climb to right now (0...1).
-    private var progressCap: Double = 0.15
-
-    /// Call this at milestones (after OCR, after request started, etc.)
     func moveTo(cap newCap: Double) {
         withAnimation(.easeInOut(duration: 0.25)) {
             progressCap = min(max(newCap, 0.0), 1.0)
@@ -73,7 +94,7 @@ final class AnalysisProgressModel: ObservableObject {
         }
 
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 450_000_000) // 0.45s
+            try? await Task.sleep(nanoseconds: 450_000_000)
             self?.stop()
         }
     }
@@ -81,16 +102,54 @@ final class AnalysisProgressModel: ObservableObject {
     func stop() {
         progressTask?.cancel()
         statusTask?.cancel()
+        creepTask?.cancel()
         progressTask = nil
         statusTask = nil
+        creepTask = nil
         isPresented = false
+
+        // ✅ reset
+        isFinishingUpLocked = false
+    }
+
+    func startCreep(to targetCap: Double, tickNs: UInt64 = 350_000_000) {
+        creepTask?.cancel()
+
+        let target = min(max(targetCap, 0.0), 1.0)
+
+        creepTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, self.isPresented {
+                try? await Task.sleep(nanoseconds: tickNs)
+
+                // If we've already reached the cap, stop creeping.
+                if self.progressCap >= target { break }
+
+                // Ease as we approach target (slows down near the end)
+                let remaining = target - self.progressCap
+                let step = max(0.003, remaining * 0.08)
+
+                let nextCap = min(target, self.progressCap + step)
+
+                await MainActor.run {
+                    // Drive cap forward; progressTask will animate progress up to that cap.
+                    self.moveTo(cap: nextCap)
+                }
+            }
+        }
+    }
+
+    func stopCreep() {
+        creepTask?.cancel()
+        creepTask = nil
     }
 }
 
-import SwiftUI
+// MARK: - Overlay UI
 
 struct AnalysisProgressOverlay: View {
     @ObservedObject var model: AnalysisProgressModel
+    let onCancel: () -> Void
 
     var body: some View {
         ZStack {
@@ -98,11 +157,19 @@ struct AnalysisProgressOverlay: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                BookFlipAnimation()
-                    .frame(width: 160, height: 120)
-
+                LottieStage(
+                    animationName: model.lottieName,
+                    speed: 2.2,                         // faster flips
+                    stageSize: CGSize(width: 260, height: 150),
+                    zoom: 1.35,                          // tweak this (1.0 - 2.0)
+                    yOffset: -6                          // tweak this (-30 ... 30)
+                )
+                .accessibilityHidden(true)
+                
                 Text(model.statusText)
                     .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 Text("\(Int(model.progress * 100))%")
                     .font(.system(size: 44, weight: .bold, design: .rounded))
@@ -115,6 +182,21 @@ struct AnalysisProgressOverlay: View {
                 Text("Working on your document…")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Text("May take a few minutes")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Divider().opacity(0.25)
+
+                Button(role: .cancel) {
+                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
             .padding(22)
             .background(.ultraThinMaterial)
@@ -127,142 +209,109 @@ struct AnalysisProgressOverlay: View {
     }
 }
 
+// MARK: - Lottie Stage (frames + “camera”)
 
-// MARK: - Book flip + hand animation (pure SwiftUI, no assets)
-
-/// Animated "researching" book: pages riffle quickly while two hands alternate flipping.
-
-
-/// Reliable "researching" animation using TimelineView (always animates).
-/// One hand flips pages quickly like searching.
-struct BookFlipAnimation: View {
+struct LottieStage: View {
+    let animationName: String
+    var speed: CGFloat
+    var stageSize: CGSize
+    var zoom: CGFloat
+    var yOffset: CGFloat
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-
-            // 0...1 repeating cycle
-            let cycle = (t * 1.15).truncatingRemainder(dividingBy: 1.0)
-
-            // page flip progress with a tiny pause at start
-            let p = remapWithPause(cycle, pause: 0.08)
-
-            ZStack {
-                bookBase
-                turningPage(progress: p)
-                flippingHand(progress: p)
-            }
-            .frame(width: 160, height: 120)
-            .accessibilityLabel("Researching")
-        }
-    }
-
-    // MARK: - Book
-
-    private var bookBase: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.thinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(.primary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.white.opacity(0.08))
                 )
 
-            // spine + faint pages
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(.primary.opacity(0.10))
-                    .frame(width: 7)
-
-                Rectangle()
-                    .fill(.primary.opacity(0.03))
-
-                Rectangle()
-                    .fill(.primary.opacity(0.03))
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(10)
-
-            // text blocks
-            VStack(spacing: 6) {
-                HStack(spacing: 12) { linesBlock; linesBlock }
-                HStack(spacing: 12) { linesBlock; linesBlock }
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .opacity(0.7)
-        }
-    }
-
-    private var linesBlock: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Capsule().fill(.primary.opacity(0.10)).frame(width: 90, height: 6)
-            Capsule().fill(.primary.opacity(0.08)).frame(width: 74, height: 6)
-            Capsule().fill(.primary.opacity(0.07)).frame(width: 84, height: 6)
-        }
-    }
-
-    // MARK: - Page
-
-    private func turningPage(progress: Double) -> some View {
-        // smoothstep
-        let p = progress * progress * (3 - 2 * progress)
-
-        // rotate like a page turning from right to left
-        let angle = -p * 120.0
-        let xOffset = -p * 24.0
-
-        return RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(.white.opacity(0.62))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(.primary.opacity(0.06))
+            LottieLoopingView(
+                animationName: animationName,
+                speed: speed,
+                zoom: zoom,
+                yOffset: yOffset
             )
-            .frame(width: 150, height: 78)
-            .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 6)
-            .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.7)
-            .offset(x: xOffset, y: 2)
-            .opacity(progress < 0.02 ? 0 : 1)
-            .allowsHitTesting(false)
-            .zIndex(2)
+            .padding(10)
+        }
+        .frame(width: stageSize.width, height: stageSize.height)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+// MARK: - Lottie UIViewRepresentable
+
+struct LottieLoopingView: UIViewRepresentable {
+    let animationName: String
+    var speed: CGFloat
+    var zoom: CGFloat
+    var yOffset: CGFloat
+
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+        container.isOpaque = false
+
+        // Force rendering engine (some animations only render correctly on mainThread)
+        let config = LottieConfiguration(renderingEngine: .mainThread)
+
+        let animationView = LottieAnimationView(configuration: config)
+        animationView.backgroundColor = .clear
+        animationView.isOpaque = false
+
+        if let animation = LottieAnimation.named(animationName) {
+            animationView.animation = animation
+        } else {
+            print("❌ Lottie animation not found in bundle: \(animationName).json")
+        }
+
+        animationView.loopMode = .loop
+        animationView.animationSpeed = speed
+
+        // We will “camera” with transform, so keep aspectFit.
+        animationView.contentMode = .scaleAspectFit
+
+        // Let container handle clipping
+        animationView.clipsToBounds = false
+        animationView.backgroundBehavior = .pauseAndRestore
+
+        container.addSubview(animationView)
+        animationView.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            animationView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            animationView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            animationView.topAnchor.constraint(equalTo: container.topAnchor),
+            animationView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+
+        animationView.play()
+
+        // Save reference
+        context.coordinator.animationView = animationView
+        return container
     }
 
-    // MARK: - Hand (one hand, moving)
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let animationView = context.coordinator.animationView else { return }
 
-    private func flippingHand(progress: Double) -> some View {
-        // Stage motion
-        let reach = clamp((progress - 0.00) / 0.25)
-        let drag  = clamp((progress - 0.25) / 0.55)
-        let back  = clamp((progress - 0.80) / 0.20)
+        animationView.animationSpeed = speed
 
-        // coming in from right, then dragging page left, then retract
-        let x = 56.0 - (reach * 18.0) - (drag * 58.0) + (back * 22.0)
-        let y = 20.0 - (reach * 10.0) - (drag * 6.0)  + (back * 8.0)
+        // Camera transform: zoom + vertical offset to frame the book
+        let clampedZoom = max(0.5, min(zoom, 3.0))
+        let t = CGAffineTransform(translationX: 0, y: yOffset)
+            .scaledBy(x: clampedZoom, y: clampedZoom)
+        animationView.transform = t
 
-        let rot = (-8.0 * reach) + (-26.0 * drag) + (10.0 * back)
-        let scale = 1.0 + (reach * 0.05) + (drag * 0.03)
-
-        return Image(systemName: "hand.raised.fill")
-            .font(.system(size: 26, weight: .semibold))
-            .foregroundStyle(.primary.opacity(0.85))
-            .scaleEffect(x: -1, y: 1) // face left
-            .scaleEffect(scale)
-            .rotationEffect(.degrees(rot))
-            .offset(x: x, y: y)
-            .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 4)
-            .allowsHitTesting(false)
-            .zIndex(3)
+        if animationView.isAnimationPlaying == false {
+            animationView.play()
+        }
     }
 
-    // MARK: - Helpers
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
-    private func clamp(_ x: Double) -> Double {
-        min(max(x, 0), 1)
-    }
-
-    private func remapWithPause(_ t: Double, pause: Double) -> Double {
-        // t: 0..1
-        if t < pause { return 0 }
-        return (t - pause) / (1 - pause)
+    final class Coordinator {
+        var animationView: LottieAnimationView?
     }
 }
